@@ -6,22 +6,25 @@ The image contains:
 
 - OpenAI Codex CLI: `codex`
 - Anthropic Claude Code CLI: `claude`
-- Common development tools: `git`, `git-lfs`, `ripgrep`, `fd`, `python3`, `pip`, `venv`, `build-essential`, `docker`, `jq`, `openssh-client`, and basic editors
+- GitHub CLI: `gh`
+- Node.js 20 and `npm`
+- Common development tools: `git`, `git-lfs`, `ripgrep`, `fd`, `python3`, `pip`, `venv`, `build-essential`, `docker`, `jq`, `sqlite3`, `curl`, `wget`, `rsync`, `tree`, `zip`, `unzip`, `openssh-client`, and basic editors
+- Troubleshooting tools: `file`, `htop`, `ip`, `ping`, `nc`, `lsof`, and `ps`
 
-The container does not bake in Codex or Claude credentials. Runtime configuration is mounted from the host.
+The image does not bake in Codex, Claude, GitHub, SSH, Git, or GnuPG credentials. Runtime configuration is mounted from the host.
 
 ## Build
 
-Run this from any directory:
-
-```bash
-docker build -t codex-universal:latest /workspace/codex-container
-```
-
-Or from this directory:
+From this directory:
 
 ```bash
 docker build -t codex-universal:latest .
+```
+
+From any directory:
+
+```bash
+docker build -t codex-universal:latest /path/to/codex-container
 ```
 
 ## Run Codex
@@ -30,7 +33,7 @@ In any repository:
 
 ```bash
 cd /path/to/repo
-/workspace/codex-container/codex-container
+/path/to/codex-container/codex-container
 ```
 
 If the launcher is on your `PATH`:
@@ -44,7 +47,7 @@ codex-container
 
 ```bash
 cd /path/to/repo
-/workspace/codex-container/codex-container --agent claude
+/path/to/codex-container/codex-container --agent claude
 ```
 
 If the launcher is on your `PATH`:
@@ -58,15 +61,25 @@ codex-container --agent claude
 
 ```bash
 cd /path/to/repo
-/workspace/codex-container/codex-container bash
+/path/to/codex-container/codex-container bash
 ```
+
+## Full Access Codex
+
+For a fully unattended local session, pass Codex its approval and sandbox flags inside the container:
+
+```bash
+codex-container codex --ask-for-approval never --sandbox danger-full-access
+```
+
+This gives the agent broad access to the mounted repository and container environment. Only use it in repositories and containers where that level of access is acceptable.
 
 ## Install The Launcher
 
 Optional, but convenient:
 
 ```bash
-sudo ln -sf /workspace/codex-container/codex-container /usr/local/bin/codex-container
+sudo ln -sf /path/to/codex-container/codex-container /usr/local/bin/codex-container
 ```
 
 Then use:
@@ -80,7 +93,7 @@ codex-container bash
 
 ## Runtime Layout
 
-The current repository is mounted here:
+The selected repository is mounted here:
 
 ```text
 /workspace/repo
@@ -111,25 +124,26 @@ This keeps agent state across `--rm` container runs.
 The launcher mounts these host paths when available:
 
 ```text
-current repo                         -> /workspace/repo
-~/.cache/codex-container/home         -> /home/codex
-~/.codex                              -> /home/codex/.codex
-~/.claude                             -> /home/codex/.claude
-~/.ssh                                -> /home/codex/.ssh:ro
-~/.gitconfig                          -> /home/codex/.gitconfig:ro
-~/.git-credentials                    -> /home/codex/.git-credentials:ro
-~/.gnupg                              -> /home/codex/.gnupg:ro
-~/.claude.json                        -> /home/codex/.claude.json
-~/.cache/codex-container/npm          -> /home/codex/.npm
-~/.cache/codex-container/pip          -> /home/codex/.cache/pip
-~/.cache/codex-container/cargo        -> /home/codex/.cargo
-~/.cache/codex-container/go           -> /home/codex/go
-~/.cache/codex-container/maven        -> /home/codex/.m2
-~/.cache/codex-container/gradle       -> /home/codex/.gradle
-~/.cache/codex-container/cache        -> /cache
+current repo                          -> /workspace/repo
+~/.cache/codex-container/home          -> /home/codex
+~/.codex                               -> /home/codex/.codex
+~/.claude                              -> /home/codex/.claude
+~/.config/gh                           -> /home/codex/.config/gh
+~/.ssh                                 -> /home/codex/.ssh:ro
+~/.gitconfig                           -> /home/codex/.gitconfig:ro
+~/.git-credentials                     -> /home/codex/.git-credentials:ro
+~/.gnupg                               -> /home/codex/.gnupg:ro
+~/.claude.json                         -> /home/codex/.claude.json
+~/.cache/codex-container/npm           -> /home/codex/.npm
+~/.cache/codex-container/pip           -> /home/codex/.cache/pip
+~/.cache/codex-container/cargo         -> /home/codex/.cargo
+~/.cache/codex-container/go            -> /home/codex/go
+~/.cache/codex-container/maven         -> /home/codex/.m2
+~/.cache/codex-container/gradle        -> /home/codex/.gradle
+~/.cache/codex-container/cache         -> /cache
 ```
 
-SSH, Git config, Git credentials, and GnuPG mounts are conditional. Missing files or directories are skipped.
+SSH, Git config, Git credentials, GnuPG, and Claude JSON mounts are conditional. Missing files or directories are skipped. Codex, Claude, and GitHub CLI config directories are created on the host if they do not exist.
 
 ## Permissions
 
@@ -144,54 +158,79 @@ The container entrypoint creates a `codex` user with those IDs and runs the comm
 
 This prevents files created inside the mounted repository from becoming owned by root on the host.
 
+## Run As Root
+
+The default entrypoint intentionally drops from root to the `codex` user. To start a one-off root shell, bypass the entrypoint:
+
+```bash
+docker run --rm -it \
+  --user root \
+  --entrypoint bash \
+  -v /path/to/repo:/workspace/repo \
+  -w /workspace/repo \
+  codex-universal:latest
+```
+
+To enter an already running container as root:
+
+```bash
+docker exec -it --user root <container-name-or-id> bash
+```
+
 ## Options
 
 Show help:
 
 ```bash
-/workspace/codex-container/codex-container --help
+codex-container --help
 ```
 
 Use Claude Code:
 
 ```bash
-/workspace/codex-container/codex-container --agent claude
+codex-container --agent claude
 ```
 
 Run against another repository:
 
 ```bash
-/workspace/codex-container/codex-container --repo /path/to/repo
+codex-container --repo /path/to/repo
 ```
 
 Use another image:
 
 ```bash
-/workspace/codex-container/codex-container --image my-codex:dev
+codex-container --image my-codex:dev
+```
+
+Set the container name:
+
+```bash
+codex-container --name my-codex-session
 ```
 
 Use another persistent home:
 
 ```bash
-/workspace/codex-container/codex-container --home ~/.cache/my-codex-home
+codex-container --home ~/.cache/my-codex-home
 ```
 
 Skip SSH mounting:
 
 ```bash
-/workspace/codex-container/codex-container --no-ssh
+codex-container --no-ssh
 ```
 
 Skip Git config mounting:
 
 ```bash
-/workspace/codex-container/codex-container --no-gitconfig
+codex-container --no-gitconfig
 ```
 
 Mount the host Docker socket:
 
 ```bash
-/workspace/codex-container/codex-container --docker
+codex-container --docker
 ```
 
 The Docker socket is not mounted by default. Mounting it gives the container broad control over the host Docker daemon.
@@ -233,16 +272,23 @@ Claude Code configuration is expected at:
 ~/.claude.json
 ```
 
-These files are mounted from the host. They are not copied into the image.
+GitHub CLI configuration is expected at:
 
-If an agent needs initial login, start it once through the container and complete the login flow:
+```text
+~/.config/gh
+```
+
+These files and directories are mounted from the host. They are not copied into the image.
+
+If an agent or tool needs initial login, start it once through the container and complete the login flow:
 
 ```bash
 codex-container
 codex-container --agent claude
+codex-container bash -lc 'gh auth status || gh auth login'
 ```
 
-The resulting state should persist in the mounted host directories.
+The resulting state persists in the mounted host directories.
 
 ## Smoke Test
 
@@ -251,7 +297,7 @@ After building the image:
 ```bash
 mkdir -p /tmp/codex-container-test
 cd /tmp/codex-container-test
-/workspace/codex-container/codex-container bash -lc 'id && pwd && command -v codex && command -v claude && command -v rg && command -v fd && touch permission-test && ls -l permission-test'
+codex-container bash -lc 'id && pwd && command -v codex && command -v claude && command -v gh && command -v rg && command -v fd && command -v node && command -v python3 && touch permission-test && ls -l permission-test'
 ```
 
 Expected checks:
@@ -259,7 +305,9 @@ Expected checks:
 - `pwd` is `/workspace/repo`
 - `codex` is available
 - `claude` is available
+- `gh` is available
 - `rg` and `fd` are available
+- `node` and `python3` are available
 - `permission-test` is owned by the host user UID/GID, not root
 
 ## Files
@@ -268,5 +316,6 @@ Expected checks:
 Dockerfile              Builds the universal Codex and Claude Code image
 codex-entrypoint.sh     Creates the non-root runtime user and drops privileges
 codex-container         Host launcher that mounts the current repository and user config
-README.md               Usage guide
+README.md               English usage guide
+README.zh-CN.md         Chinese usage guide
 ```

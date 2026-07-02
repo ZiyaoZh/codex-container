@@ -6,22 +6,25 @@
 
 - OpenAI Codex CLI：`codex`
 - Anthropic Claude Code CLI：`claude`
-- 常用开发工具：`git`、`git-lfs`、`ripgrep`、`fd`、`python3`、`pip`、`venv`、`build-essential`、`docker`、`jq`、`openssh-client` 和基础编辑器
+- GitHub CLI：`gh`
+- Node.js 20 和 `npm`
+- 常用开发工具：`git`、`git-lfs`、`ripgrep`、`fd`、`python3`、`pip`、`venv`、`build-essential`、`docker`、`jq`、`sqlite3`、`curl`、`wget`、`rsync`、`tree`、`zip`、`unzip`、`openssh-client` 和基础编辑器
+- 排障工具：`file`、`htop`、`ip`、`ping`、`nc`、`lsof` 和 `ps`
 
-镜像不会内置 Codex 或 Claude 的凭据。运行时配置会从宿主机挂载进容器。
+镜像不会内置 Codex、Claude、GitHub、SSH、Git 或 GnuPG 的凭据。运行时配置会从宿主机挂载进容器。
 
 ## 构建镜像
 
-可以在任意目录执行：
-
-```bash
-docker build -t codex-universal:latest /workspace/codex-container
-```
-
-也可以在本目录执行：
+在本目录执行：
 
 ```bash
 docker build -t codex-universal:latest .
+```
+
+也可以在任意目录执行：
+
+```bash
+docker build -t codex-universal:latest /path/to/codex-container
 ```
 
 ## 启动 Codex
@@ -30,7 +33,7 @@ docker build -t codex-universal:latest .
 
 ```bash
 cd /path/to/repo
-/workspace/codex-container/codex-container
+/path/to/codex-container/codex-container
 ```
 
 如果已经把启动脚本放到 `PATH`：
@@ -44,7 +47,7 @@ codex-container
 
 ```bash
 cd /path/to/repo
-/workspace/codex-container/codex-container --agent claude
+/path/to/codex-container/codex-container --agent claude
 ```
 
 如果已经把启动脚本放到 `PATH`：
@@ -58,21 +61,25 @@ codex-container --agent claude
 
 ```bash
 cd /path/to/repo
-/workspace/codex-container/codex-container bash
+/path/to/codex-container/codex-container bash
 ```
 
-- 使用 YOLO MODE 启动 codex
+## 全权限 Codex
+
+如果需要无人值守的本地会话，可以把 Codex 的 approval 和 sandbox 参数传给容器内的 `codex`：
 
 ```bash
-codex --ask-for-approval never --sandbox danger-full-access
+codex-container codex --ask-for-approval never --sandbox danger-full-access
 ```
+
+这会让 agent 对挂载的仓库和容器环境拥有较高权限。只应在你接受这种访问范围的仓库和容器中使用。
 
 ## 安装启动脚本
 
 这一步是可选的，但会更方便：
 
 ```bash
-sudo ln -sf /workspace/codex-container/codex-container /usr/local/bin/codex-container
+sudo ln -sf /path/to/codex-container/codex-container /usr/local/bin/codex-container
 ```
 
 之后可以直接使用：
@@ -86,7 +93,7 @@ codex-container bash
 
 ## 运行时目录
 
-当前仓库会被挂载到：
+指定的仓库会被挂载到：
 
 ```text
 /workspace/repo
@@ -117,25 +124,26 @@ codex-container bash
 启动脚本会在路径存在时挂载这些宿主机路径：
 
 ```text
-当前仓库                              -> /workspace/repo
-~/.cache/codex-container/home         -> /home/codex
-~/.codex                              -> /home/codex/.codex
-~/.claude                             -> /home/codex/.claude
-~/.ssh                                -> /home/codex/.ssh:ro
-~/.gitconfig                          -> /home/codex/.gitconfig:ro
-~/.git-credentials                    -> /home/codex/.git-credentials:ro
-~/.gnupg                              -> /home/codex/.gnupg:ro
-~/.claude.json                        -> /home/codex/.claude.json
-~/.cache/codex-container/npm          -> /home/codex/.npm
-~/.cache/codex-container/pip          -> /home/codex/.cache/pip
-~/.cache/codex-container/cargo        -> /home/codex/.cargo
-~/.cache/codex-container/go           -> /home/codex/go
-~/.cache/codex-container/maven        -> /home/codex/.m2
-~/.cache/codex-container/gradle       -> /home/codex/.gradle
-~/.cache/codex-container/cache        -> /cache
+当前仓库                               -> /workspace/repo
+~/.cache/codex-container/home          -> /home/codex
+~/.codex                               -> /home/codex/.codex
+~/.claude                              -> /home/codex/.claude
+~/.config/gh                           -> /home/codex/.config/gh
+~/.ssh                                 -> /home/codex/.ssh:ro
+~/.gitconfig                           -> /home/codex/.gitconfig:ro
+~/.git-credentials                     -> /home/codex/.git-credentials:ro
+~/.gnupg                               -> /home/codex/.gnupg:ro
+~/.claude.json                         -> /home/codex/.claude.json
+~/.cache/codex-container/npm           -> /home/codex/.npm
+~/.cache/codex-container/pip           -> /home/codex/.cache/pip
+~/.cache/codex-container/cargo         -> /home/codex/.cargo
+~/.cache/codex-container/go            -> /home/codex/go
+~/.cache/codex-container/maven         -> /home/codex/.m2
+~/.cache/codex-container/gradle        -> /home/codex/.gradle
+~/.cache/codex-container/cache         -> /cache
 ```
 
-SSH、Git 配置、Git 凭据和 GnuPG 都是条件挂载。对应文件或目录不存在时会自动跳过。
+SSH、Git 配置、Git 凭据、GnuPG 和 Claude JSON 都是条件挂载。对应文件或目录不存在时会自动跳过。Codex、Claude 和 GitHub CLI 的配置目录不存在时会在宿主机上自动创建。
 
 ## 文件权限
 
@@ -152,12 +160,21 @@ CODEX_GID=$(id -g)
 
 ## 以 root 运行
 
-如果需要以 root 用户运行容器，可以使用 `--user` 参数：
+默认入口脚本会刻意从 root 降权到 `codex` 用户。如果需要启动一次性的 root shell，可以绕过入口脚本：
 
 ```bash
-docker run --rm -it --user root -v /path/to/repo:/workspace/repo codex-universal:latest bash
+docker run --rm -it \
+  --user root \
+  --entrypoint bash \
+  -v /path/to/repo:/workspace/repo \
+  -w /workspace/repo \
+  codex-universal:latest
+```
 
-docker exec -it --user root <container-id> bash
+如果要进入已经运行的容器：
+
+```bash
+docker exec -it --user root <container-name-or-id> bash
 ```
 
 ## 参数
@@ -165,49 +182,55 @@ docker exec -it --user root <container-id> bash
 查看帮助：
 
 ```bash
-/workspace/codex-container/codex-container --help
+codex-container --help
 ```
 
 使用 Claude Code：
 
 ```bash
-/workspace/codex-container/codex-container --agent claude
+codex-container --agent claude
 ```
 
 指定另一个仓库：
 
 ```bash
-/workspace/codex-container/codex-container --repo /path/to/repo
+codex-container --repo /path/to/repo
 ```
 
 使用另一个镜像：
 
 ```bash
-/workspace/codex-container/codex-container --image my-codex:dev
+codex-container --image my-codex:dev
+```
+
+指定容器名：
+
+```bash
+codex-container --name my-codex-session
 ```
 
 指定另一个持久化 home：
 
 ```bash
-/workspace/codex-container/codex-container --home ~/.cache/my-codex-home
+codex-container --home ~/.cache/my-codex-home
 ```
 
 不挂载 SSH：
 
 ```bash
-/workspace/codex-container/codex-container --no-ssh
+codex-container --no-ssh
 ```
 
 不挂载 Git 配置：
 
 ```bash
-/workspace/codex-container/codex-container --no-gitconfig
+codex-container --no-gitconfig
 ```
 
 挂载宿主机 Docker socket：
 
 ```bash
-/workspace/codex-container/codex-container --docker
+codex-container --docker
 ```
 
 Docker socket 默认不会挂载。挂载它之后，容器会获得对宿主机 Docker daemon 的高权限访问能力。
@@ -249,13 +272,20 @@ Claude Code 配置默认来自：
 ~/.claude.json
 ```
 
-这些文件会从宿主机挂载进容器，不会复制进镜像。
+GitHub CLI 配置默认来自：
 
-如果某个 agent 需要首次登录，可以通过容器启动一次并完成登录流程：
+```text
+~/.config/gh
+```
+
+这些文件和目录会从宿主机挂载进容器，不会复制进镜像。
+
+如果某个 agent 或工具需要首次登录，可以通过容器启动一次并完成登录流程：
 
 ```bash
 codex-container
 codex-container --agent claude
+codex-container bash -lc 'gh auth status || gh auth login'
 ```
 
 登录后的状态会保存在挂载的宿主机目录中。
@@ -267,7 +297,7 @@ codex-container --agent claude
 ```bash
 mkdir -p /tmp/codex-container-test
 cd /tmp/codex-container-test
-/workspace/codex-container/codex-container bash -lc 'id && pwd && command -v codex && command -v claude && command -v rg && command -v fd && touch permission-test && ls -l permission-test'
+codex-container bash -lc 'id && pwd && command -v codex && command -v claude && command -v gh && command -v rg && command -v fd && command -v node && command -v python3 && touch permission-test && ls -l permission-test'
 ```
 
 预期检查结果：
@@ -275,7 +305,9 @@ cd /tmp/codex-container-test
 - `pwd` 是 `/workspace/repo`
 - `codex` 可用
 - `claude` 可用
+- `gh` 可用
 - `rg` 和 `fd` 可用
+- `node` 和 `python3` 可用
 - `permission-test` 属于宿主机用户 UID/GID，而不是 root
 
 ## 文件说明
