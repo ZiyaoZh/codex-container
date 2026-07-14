@@ -59,6 +59,14 @@ cd /path/to/repo
 codex-container
 ```
 
+You can start additional sessions from other terminals in the same repository:
+
+```bash
+codex-container codex
+```
+
+The first session creates the named container. Later sessions reuse that running container with `docker exec`, so multiple Codex, Claude, shell, or custom command processes can run in it concurrently. Mount-related options are determined by the first session and cannot be changed by later sessions until that container exits.
+
 ## Run Claude Code
 
 ```bash

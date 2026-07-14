@@ -59,6 +59,14 @@ cd /path/to/repo
 codex-container
 ```
 
+可以在同一仓库的其他终端继续启动会话：
+
+```bash
+codex-container codex
+```
+
+第一个会话会创建具名容器，后续会话通过 `docker exec` 复用正在运行的容器，因此可以同时运行多个 Codex、Claude、Shell 或自定义命令进程。挂载相关参数由第一个会话决定，在该容器退出前，后续会话不能修改这些挂载配置。
+
 ## 启动 Claude Code
 
 ```bash

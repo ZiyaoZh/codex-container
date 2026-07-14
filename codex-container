@@ -137,11 +137,47 @@ CONTAINER_WORKDIR="/workspace/repo"
 CACHE_ROOT="${CODEX_CACHE_ROOT:-$HOME/.cache/codex-container}"
 CONTAINER_HOME="${CONTAINER_HOME:-$CACHE_ROOT/home}"
 
+if [[ "${#command_args[@]}" -gt 0 ]]; then
+  container_command=("${command_args[@]}")
+else
+  container_command=("$AGENT")
+fi
+
+if container_running="$(docker inspect --format '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null)"; then
+  if [[ "$container_running" != "true" ]]; then
+    echo "Container exists but is not running: $CONTAINER_NAME" >&2
+    echo "Remove it with: docker rm $CONTAINER_NAME" >&2
+    exit 1
+  fi
+
+  existing_repo="$(docker inspect \
+    --format '{{with index .Config.Labels "dev.codex-container.repo"}}{{.}}{{end}}' \
+    "$CONTAINER_NAME")"
+  if [[ -n "$existing_repo" && "$existing_repo" != "$REPO_DIR" ]]; then
+    echo "Container name is already used for another repository: $CONTAINER_NAME" >&2
+    echo "Existing repository: $existing_repo" >&2
+    echo "Requested repository: $REPO_DIR" >&2
+    exit 1
+  fi
+
+  echo "Reusing running container: $CONTAINER_NAME" >&2
+  exec docker exec \
+    -it \
+    --user "$(id -u):$(id -g)" \
+    -e "HOME=/home/codex" \
+    -e "TERM=${TERM:-xterm-256color}" \
+    -e "COLORTERM=${COLORTERM:-truecolor}" \
+    -w "$CONTAINER_WORKDIR" \
+    "$CONTAINER_NAME" \
+    "${container_command[@]}"
+fi
+
 docker_args=(
   run
   --rm
   -it
   --name "$CONTAINER_NAME"
+  --label "dev.codex-container.repo=$REPO_DIR"
   -e "CODEX_UID=$(id -u)"
   -e "CODEX_GID=$(id -g)"
   -e "TERM=${TERM:-xterm-256color}"
@@ -207,11 +243,6 @@ if [[ "$MOUNT_DOCKER" == "1" ]]; then
 fi
 
 docker_args+=("$IMAGE")
-
-if [[ "${#command_args[@]}" -gt 0 ]]; then
-  docker_args+=("${command_args[@]}")
-else
-  docker_args+=("$AGENT")
-fi
+docker_args+=("${container_command[@]}")
 
 exec docker "${docker_args[@]}"
