@@ -8,10 +8,10 @@ The image contains:
 - Anthropic Claude Code CLI: `claude`
 - GitHub CLI: `gh`
 - Node.js 20 and `npm`
-- Common development tools: `git`, `git-lfs`, `ripgrep`, `fd`, `python3`, `pip`, `venv`, `build-essential`, `docker`, `jq`, `sqlite3`, `curl`, `wget`, `rsync`, `tree`, `zip`, `unzip`, `openssh-client`, and basic editors
+- Common development tools: `git`, `git-lfs`, `ripgrep`, `fd`, `python3`, `pip`, `venv`, `build-essential`, Docker CLI, Docker Compose v2, Docker Buildx, `jq`, `sqlite3`, `curl`, `wget`, `rsync`, `tree`, `zip`, `unzip`, `openssh-client`, and basic editors
 - Troubleshooting tools: `file`, `htop`, `ip`, `ping`, `nc`, `lsof`, and `ps`
 
-The image does not bake in Codex, Claude, GitHub, SSH, Git, or GnuPG credentials. Runtime configuration is mounted from the host.
+The image does not bake in Codex, Claude, Docker, GitHub, SSH, Git, or GnuPG credentials. Runtime configuration is mounted from the host.
 
 ## Build
 
@@ -66,6 +66,32 @@ codex-container codex
 ```
 
 The first session creates the named container. Later sessions reuse that running container with `docker exec`, so multiple Codex, Claude, shell, or custom command processes can run in it concurrently. Mount-related options are determined by the first session and cannot be changed by later sessions until that container exits.
+
+Older launcher versions could append an unintended trailing `-` to the default container name. The corrected launcher uses `codex-<repo-name>` exactly, so it can create a clean replacement alongside an older running container whose name ends in `-`.
+
+## Docker Access
+
+When the launcher runs on a host where `/var/run/docker.sock` exists, Docker access is enabled automatically for the first session:
+
+```bash
+codex-container
+```
+
+The launcher mounts the host socket, maps its group ID to the non-root `codex` user, conditionally mounts the host `~/.docker` configuration, and mounts the repository at its original host path so Compose bind mounts resolve correctly. Use `--docker` to require this setup and fail immediately when the host socket is unavailable:
+
+```bash
+codex-container --docker
+```
+
+Verify the complete setup with:
+
+```bash
+codex-container --docker bash -lc 'id && docker info && docker compose version && docker buildx version'
+```
+
+Use `--no-docker` or `CODEX_MOUNT_DOCKER=0` to keep the socket out of the container. Docker socket access gives the coding agent broad control over the host daemon, including the ability to start privileged containers and mount host paths, so only enable it for trusted repositories and sessions.
+
+Docker mount choices are fixed by the first session for a named container. If a running container has the opposite setting, exit its active sessions before restarting with `--docker` or `--no-docker`.
 
 ## Run Claude Code
 
@@ -123,11 +149,13 @@ The selected repository is mounted here:
 /workspace/repo
 ```
 
-The container runs with this working directory:
+Normally, the container runs with this working directory:
 
 ```text
 /workspace/repo
 ```
+
+When Docker access is enabled, the repository is also mounted at the same absolute path it has on the host, and that path becomes the working directory. The `/workspace/repo` mount remains available for compatibility. Matching paths are required because bind mounts are resolved by the host Docker daemon rather than inside the agent container.
 
 The container home is mounted here:
 
@@ -167,6 +195,16 @@ current repo                          -> /workspace/repo
 ~/.cache/codex-container/cache         -> /cache
 ```
 
+When the host Docker socket is enabled, the launcher additionally mounts:
+
+```text
+/var/run/docker.sock                   -> /var/run/docker.sock
+absolute host repository path          -> same absolute container path
+~/.docker                              -> /home/codex/.docker
+```
+
+The `~/.docker` mount is conditional. If the host directory does not exist, Docker creates and uses configuration inside the persistent container home instead.
+
 SSH, Git config, Git credentials, GnuPG, and Claude JSON mounts are conditional. Missing files or directories are skipped. Codex, Claude, and GitHub CLI config directories are created on the host if they do not exist.
 
 ## Permissions
@@ -181,6 +219,8 @@ CODEX_GID=$(id -g)
 The container entrypoint creates a `codex` user with those IDs and runs the command as that user.
 
 This prevents files created inside the mounted repository from becoming owned by root on the host.
+
+When Docker access is enabled, the entrypoint reads the group ID of `/var/run/docker.sock` and adds the `codex` user to a matching supplementary group. This allows Docker commands while the agent itself continues to run as `codex`.
 
 ## Run As Root
 
@@ -251,13 +291,19 @@ Skip Git config mounting:
 codex-container --no-gitconfig
 ```
 
-Mount the host Docker socket:
+Require the Docker CLI, Compose, and Buildx through the host Docker socket:
 
 ```bash
 codex-container --docker
 ```
 
-The Docker socket is not mounted by default. Mounting it gives the container broad control over the host Docker daemon.
+Docker access is normally enabled automatically when the socket exists. `--docker` makes the socket mandatory. A later session cannot add it to an already-running container, so exit the active sessions and recreate the container if it was initially started without Docker access.
+
+Explicitly disable automatic Docker socket mounting:
+
+```bash
+codex-container --no-docker
+```
 
 ## Environment Variables
 
@@ -270,7 +316,7 @@ CODEX_AGENT             Agent to start: codex or claude. Default: codex
 CODEX_CONTAINER_NAME    Container name. Default: codex-<repo-name>
 CODEX_CONTAINER_HOME    Persistent /home/codex path. Default: ~/.cache/codex-container/home
 CODEX_CACHE_ROOT        Cache root. Default: ~/.cache/codex-container
-CODEX_MOUNT_DOCKER      Set to 1 to mount /var/run/docker.sock
+CODEX_MOUNT_DOCKER      auto, 1, or 0. Default: auto
 ```
 
 Examples:
@@ -279,6 +325,7 @@ Examples:
 CODEX_AGENT=claude codex-container
 CODEX_IMAGE=codex-universal:dev codex-container
 CODEX_MOUNT_DOCKER=1 codex-container
+CODEX_MOUNT_DOCKER=0 codex-container
 ```
 
 ## Authentication
@@ -333,6 +380,12 @@ Expected checks:
 - `rg` and `fd` are available
 - `node` and `python3` are available
 - `permission-test` is owned by the host user UID/GID, not root
+
+When the host Docker socket is available, verify Docker separately:
+
+```bash
+codex-container --docker bash -lc 'docker info && docker run --rm hello-world && docker compose version && docker buildx version'
+```
 
 ## Files
 

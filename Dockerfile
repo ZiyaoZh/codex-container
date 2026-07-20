@@ -9,7 +9,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
     curl \
-    docker.io \
     fd-find \
     file \
     git \
@@ -42,6 +41,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     zip \
     xz-utils \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN install -d -m 0755 /etc/apt/keyrings \
+  && curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+    -o /etc/apt/keyrings/docker.asc \
+  && chmod a+r /etc/apt/keyrings/docker.asc \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+    > /etc/apt/sources.list.d/docker.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends \
+    docker-buildx-plugin \
+    docker-ce-cli \
+    docker-compose-plugin \
   && rm -rf /var/lib/apt/lists/*
 
 RUN install -d -m 0755 /etc/apt/keyrings \

@@ -13,7 +13,8 @@ Options:
   --image IMAGE          Docker image to run. Defaults to codex-universal:latest.
   --name NAME            Container name. Defaults to codex-<repo-name>.
   --home PATH            Persistent container home. Defaults to ~/.cache/codex-container/home.
-  --docker               Mount /var/run/docker.sock when it exists.
+  --docker               Require Docker access through the host Docker socket.
+  --no-docker            Do not mount the host Docker socket.
   --no-ssh               Do not mount ~/.ssh.
   --no-gitconfig         Do not mount ~/.gitconfig.
   -h, --help             Show this help.
@@ -22,6 +23,7 @@ Examples:
   codex-container
   codex-container --update
   codex-container --agent claude
+  codex-container --docker
   codex-container bash
   codex-container --repo /path/to/repo --agent claude
   CODEX_IMAGE=my-codex:dev codex-container
@@ -32,7 +34,7 @@ IMAGE="${CODEX_IMAGE:-codex-universal:latest}"
 REPO_DIR="${CODEX_REPO_DIR:-$PWD}"
 AGENT="${CODEX_AGENT:-codex}"
 CONTAINER_NAME="${CODEX_CONTAINER_NAME:-}"
-MOUNT_DOCKER="${CODEX_MOUNT_DOCKER:-0}"
+MOUNT_DOCKER="${CODEX_MOUNT_DOCKER:-auto}"
 MOUNT_SSH=1
 MOUNT_GITCONFIG=1
 CONTAINER_HOME="${CODEX_CONTAINER_HOME:-}"
@@ -75,6 +77,10 @@ while [[ "$#" -gt 0 ]]; do
       MOUNT_DOCKER=1
       shift
       ;;
+    --no-docker)
+      MOUNT_DOCKER=0
+      shift
+      ;;
     --no-ssh)
       MOUNT_SSH=0
       shift
@@ -98,6 +104,17 @@ while [[ "$#" -gt 0 ]]; do
       ;;
   esac
 done
+
+case "$MOUNT_DOCKER" in
+  auto|0|1) ;;
+  *)
+    echo "Invalid CODEX_MOUNT_DOCKER value: $MOUNT_DOCKER" >&2
+    echo "Expected: auto, 0, or 1" >&2
+    exit 2
+    ;;
+esac
+
+DOCKER_REQUEST="$MOUNT_DOCKER"
 
 if [[ "$UPDATE_IMAGE" == "1" ]]; then
   if [[ "${#command_args[@]}" -gt 0 ]]; then
@@ -131,11 +148,27 @@ if [[ ! -d "$REPO_DIR" ]]; then
 fi
 
 REPO_DIR="$(cd "$REPO_DIR" && pwd)"
-REPO_NAME="$(basename "$REPO_DIR" | tr -c 'a-zA-Z0-9_.-' '-')"
+REPO_BASENAME="$(basename "$REPO_DIR")"
+REPO_NAME="$(printf '%s' "$REPO_BASENAME" | tr -c 'a-zA-Z0-9_.-' '-')"
 CONTAINER_NAME="${CONTAINER_NAME:-codex-${REPO_NAME}}"
-CONTAINER_WORKDIR="/workspace/repo"
+DEFAULT_CONTAINER_WORKDIR="/workspace/repo"
+CONTAINER_WORKDIR="$DEFAULT_CONTAINER_WORKDIR"
 CACHE_ROOT="${CODEX_CACHE_ROOT:-$HOME/.cache/codex-container}"
 CONTAINER_HOME="${CONTAINER_HOME:-$CACHE_ROOT/home}"
+DOCKER_MODE="none"
+
+if [[ "$MOUNT_DOCKER" == "auto" ]]; then
+  if [[ -S /var/run/docker.sock ]]; then
+    MOUNT_DOCKER=1
+  else
+    MOUNT_DOCKER=0
+  fi
+fi
+
+if [[ "$MOUNT_DOCKER" == "1" ]]; then
+  CONTAINER_WORKDIR="$REPO_DIR"
+  DOCKER_MODE="socket"
+fi
 
 if [[ "${#command_args[@]}" -gt 0 ]]; then
   container_command=("${command_args[@]}")
@@ -160,15 +193,42 @@ if container_running="$(docker inspect --format '{{.State.Running}}' "$CONTAINER
     exit 1
   fi
 
+  existing_workdir="$(docker inspect \
+    --format '{{with index .Config.Labels "dev.codex-container.workdir"}}{{.}}{{end}}' \
+    "$CONTAINER_NAME")"
+  if [[ -n "$existing_workdir" ]]; then
+    CONTAINER_WORKDIR="$existing_workdir"
+  else
+    CONTAINER_WORKDIR="$DEFAULT_CONTAINER_WORKDIR"
+  fi
+
+  existing_docker_socket="$(docker inspect \
+    --format '{{range .Mounts}}{{if eq .Destination "/var/run/docker.sock"}}{{.Source}}{{end}}{{end}}' \
+    "$CONTAINER_NAME")"
+
+  if [[ "$MOUNT_DOCKER" == "1" ]]; then
+    if [[ -z "$existing_docker_socket" ]]; then
+      echo "The running container was started without Docker access: $CONTAINER_NAME" >&2
+      echo "Exit its active sessions, then start it again with --docker." >&2
+      exit 1
+    fi
+  fi
+
+  if [[ "$DOCKER_REQUEST" == "0" && -n "$existing_docker_socket" ]]; then
+    echo "The running container already has Docker access: $CONTAINER_NAME" >&2
+    echo "Exit its active sessions, then start it again with --no-docker." >&2
+    exit 1
+  fi
+
   echo "Reusing running container: $CONTAINER_NAME" >&2
   exec docker exec \
     -it \
-    --user "$(id -u):$(id -g)" \
     -e "HOME=/home/codex" \
     -e "TERM=${TERM:-xterm-256color}" \
     -e "COLORTERM=${COLORTERM:-truecolor}" \
     -w "$CONTAINER_WORKDIR" \
     "$CONTAINER_NAME" \
+    gosu codex \
     "${container_command[@]}"
 fi
 
@@ -178,13 +238,20 @@ docker_args=(
   -it
   --name "$CONTAINER_NAME"
   --label "dev.codex-container.repo=$REPO_DIR"
+  --label "dev.codex-container.workdir=$CONTAINER_WORKDIR"
+  --label "dev.codex-container.docker-mode=$DOCKER_MODE"
   -e "CODEX_UID=$(id -u)"
   -e "CODEX_GID=$(id -g)"
   -e "TERM=${TERM:-xterm-256color}"
   -e "COLORTERM=${COLORTERM:-truecolor}"
-  -v "$REPO_DIR:$CONTAINER_WORKDIR"
+  -v "$REPO_DIR:$DEFAULT_CONTAINER_WORKDIR"
   -w "$CONTAINER_WORKDIR"
 )
+
+if [[ "$MOUNT_DOCKER" == "1" && "$REPO_DIR" != "$DEFAULT_CONTAINER_WORKDIR" ]]; then
+  # The host daemon must see bind-mount paths exactly as the Docker client sends them.
+  docker_args+=(-v "$REPO_DIR:$REPO_DIR")
+fi
 
 mount_if_exists() {
   local source="$1"
@@ -240,6 +307,11 @@ if [[ "$MOUNT_DOCKER" == "1" ]]; then
     echo "Docker socket was requested but /var/run/docker.sock does not exist." >&2
     exit 1
   fi
+fi
+
+if [[ "$MOUNT_DOCKER" == "1" ]]; then
+  docker_args+=(-e "DOCKER_HOST=unix:///var/run/docker.sock")
+  mount_if_exists "$HOME/.docker" "/home/codex/.docker"
 fi
 
 docker_args+=("$IMAGE")
