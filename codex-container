@@ -373,7 +373,7 @@ mkdir -p \
   "$HOME/.claude" \
   "$HOME/.config/gh" \
   "$CACHE_ROOT"/{npm,pip,cargo,go,maven,gradle,cache} \
-  "$CONTAINER_HOME/.config"
+  "$CONTAINER_HOME"/{.cache,.config}
 
 docker_args+=(
   -v "$CONTAINER_HOME:/home/codex"

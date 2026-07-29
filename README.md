@@ -8,6 +8,7 @@ The image contains:
 - Anthropic Claude Code CLI: `claude`
 - GitHub CLI: `gh`
 - Node.js 20 and `npm`
+- Chromium runtime dependencies required by Playwright, including fonts and headless-rendering libraries
 - Common development tools: `git`, `git-lfs`, `ripgrep`, `fd`, `python3`, `pip`, `venv`, `build-essential`, Docker CLI, Docker Compose v2, Docker Buildx, `jq`, `sqlite3`, `curl`, `wget`, `rsync`, `tree`, `zip`, `unzip`, `openssh-client`, and basic editors
 - Troubleshooting tools: `file`, `htop`, `ip`, `ping`, `nc`, `lsof`, and `ps`
 
@@ -190,6 +191,8 @@ By default, the host path for the persistent container home is:
 ```
 
 This keeps agent state across `--rm` container runs.
+The launcher creates `/home/codex/.cache` in this persistent home, and the entrypoint assigns it to the
+runtime Codex UID/GID so browser tooling can write its cache without running as root.
 
 ## Default Mounts
 

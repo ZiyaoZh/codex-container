@@ -71,6 +71,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
   && apt-get install -y --no-install-recommends nodejs \
   && rm -rf /var/lib/apt/lists/*
 
+# Install Chromium's shared libraries, fonts, and headless-rendering dependencies.
+RUN npx --yes playwright install-deps chromium \
+  && npm cache clean --force \
+  && rm -rf /var/lib/apt/lists/*
+
 RUN install -d -m 0755 /etc/apt/keyrings \
   && curl -fsSL https://downloads.claude.ai/keys/claude-code.asc \
     -o /etc/apt/keyrings/claude-code.asc \

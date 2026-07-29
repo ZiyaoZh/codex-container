@@ -8,6 +8,7 @@
 - Anthropic Claude Code CLI：`claude`
 - GitHub CLI：`gh`
 - Node.js 20 和 `npm`
+- Playwright 所需的 Chromium 运行时依赖，包括字体和无头渲染库
 - 常用开发工具：`git`、`git-lfs`、`ripgrep`、`fd`、`python3`、`pip`、`venv`、`build-essential`、Docker CLI、Docker Compose v2、Docker Buildx、`jq`、`sqlite3`、`curl`、`wget`、`rsync`、`tree`、`zip`、`unzip`、`openssh-client` 和基础编辑器
 - 排障工具：`file`、`htop`、`ip`、`ping`、`nc`、`lsof` 和 `ps`
 
@@ -190,6 +191,8 @@ codex-container bash
 ```
 
 这样即使容器使用 `--rm` 自动删除，agent 的运行状态也可以保留。
+启动脚本会在这个持久化 home 中创建 `/home/codex/.cache`，入口脚本再将其属主设置为运行时
+Codex 用户的 UID/GID，使浏览器测试工具无需 root 权限即可写入缓存。
 
 ## 默认挂载
 
