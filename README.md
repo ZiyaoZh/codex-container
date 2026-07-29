@@ -67,6 +67,26 @@ codex-container codex
 
 The first session creates the named container. Later sessions reuse that running container with `docker exec`, so multiple Codex, Claude, shell, or custom command processes can run in it concurrently. Mount-related options are determined by the first session and cannot be changed by later sessions until that container exits.
 
+## Extra Directory Mounts
+
+Use the repeatable `--mount` option to make one or more additional host directories available in the container:
+
+```bash
+codex-container \
+  --mount /path/to/shared-data \
+  --mount /path/to/config:/workspace/config:ro
+```
+
+The accepted format is:
+
+```text
+--mount HOST_PATH[:CONTAINER_PATH[:ro|rw]]
+```
+
+When `CONTAINER_PATH` is omitted, the directory is mounted at the same absolute path inside the container. The default mode is `rw`; use `ro` for read-only inputs. `HOST_PATH` may be relative to the directory where the launcher is invoked, but the directory must already exist. Repeat `--mount` once per directory.
+
+Extra mounts are fixed when the named container is first created. A later session may request an existing mount, but it cannot add or change one. Exit all sessions using that container and start it again with the desired mount options to change them.
+
 Older launcher versions could append an unintended trailing `-` to the default container name. The corrected launcher uses `codex-<repo-name>` exactly, so it can create a clean replacement alongside an older running container whose name ends in `-`.
 
 ## Docker Access
@@ -277,6 +297,13 @@ Use another persistent home:
 
 ```bash
 codex-container --home ~/.cache/my-codex-home
+```
+
+Mount additional directories (repeat the option for multiple directories):
+
+```bash
+codex-container --mount /path/to/data
+codex-container --mount /path/to/data:/workspace/data:ro --mount ../shared
 ```
 
 Skip SSH mounting:

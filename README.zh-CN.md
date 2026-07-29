@@ -67,6 +67,26 @@ codex-container codex
 
 第一个会话会创建具名容器，后续会话通过 `docker exec` 复用正在运行的容器，因此可以同时运行多个 Codex、Claude、Shell 或自定义命令进程。挂载相关参数由第一个会话决定，在该容器退出前，后续会话不能修改这些挂载配置。
 
+## 额外挂载目录
+
+使用可重复传入的 `--mount` 参数，可以主动把一个或多个宿主机目录挂载进容器：
+
+```bash
+codex-container \
+  --mount /path/to/shared-data \
+  --mount /path/to/config:/workspace/config:ro
+```
+
+参数格式为：
+
+```text
+--mount HOST_PATH[:CONTAINER_PATH[:ro|rw]]
+```
+
+省略 `CONTAINER_PATH` 时，该目录会按照宿主机上的绝对路径挂载到容器内。默认以 `rw` 模式读写挂载；对只读输入可使用 `ro`。`HOST_PATH` 可以是相对于启动器执行目录的路径，但目录必须已经存在。每个目录分别传入一次 `--mount` 即可。
+
+具名容器的额外挂载由第一个会话确定。后续会话可以再次声明已经存在的挂载，但不能给运行中的容器新增或修改挂载。需要变更时，应退出使用该容器的所有会话，再用所需的 `--mount` 参数重新启动。
+
 旧版启动器可能会在默认容器名末尾错误地追加一个 `-`。修复后的名称严格为 `codex-<仓库名>`，因此可以在旧容器仍运行时创建一个名称正确的新容器，用于迁移到新的挂载配置。
 
 ## 使用 Docker
@@ -277,6 +297,13 @@ codex-container --name my-codex-session
 
 ```bash
 codex-container --home ~/.cache/my-codex-home
+```
+
+额外挂载目录（多个目录时重复传入该参数）：
+
+```bash
+codex-container --mount /path/to/data
+codex-container --mount /path/to/data:/workspace/data:ro --mount ../shared
 ```
 
 不挂载 SSH：
