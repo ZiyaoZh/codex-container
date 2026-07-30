@@ -90,7 +90,7 @@ ARG CODEX_CACHE_BUST=0
 RUN echo "Installing Codex ${CODEX_VERSION} (cache bust: ${CODEX_CACHE_BUST})" \
   && npm install -g "@openai/codex@${CODEX_VERSION}"
 
-RUN pip3 install --no-cache-dir beautifulsoup4 ruff pytest requests
+RUN pip3 install --no-cache-dir beautifulsoup4 httpx ruff pytest requests
 
 RUN ln -sf /usr/bin/fdfind /usr/local/bin/fd
 
