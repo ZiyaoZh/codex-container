@@ -66,7 +66,27 @@ You can start additional sessions from other terminals in the same repository:
 codex-container codex
 ```
 
-The first session creates the named container. Later sessions reuse that running container with `docker exec`, so multiple Codex, Claude, shell, or custom command processes can run in it concurrently. Mount-related options are determined by the first session and cannot be changed by later sessions until that container exits.
+The first session creates the named container. Later sessions reuse that running container with `docker exec`, so multiple Codex, Claude, shell, or custom command processes can run in it concurrently. Creation-time settings such as directory mounts and published ports are determined by the first session and cannot be changed by later sessions until that container exits.
+
+## Port Mappings
+
+Use the repeatable `-p` or `--port` option to publish container ports on the host:
+
+```bash
+codex-container \
+  --port 8080:3000 \
+  --port 127.0.0.1:5432:5432
+```
+
+The accepted format is:
+
+```text
+--port [HOST_IP:]HOST_PORT:CONTAINER_PORT[/tcp|udp]
+```
+
+Ports must be integers from `1` to `65535`; the protocol defaults to `tcp`. When `HOST_IP` is omitted, Docker publishes the port on all host interfaces by default. Use `127.0.0.1` when access should be limited to the local host. Repeat `--port` once per mapping.
+
+Port mappings are fixed when the named container is first created. A later session may request an existing mapping, but it cannot add or change one. Exit all sessions using that container and start it again with the desired `--port` options to change them.
 
 ## Extra Directory Mounts
 
@@ -316,6 +336,13 @@ Mount additional directories (repeat the option for multiple directories):
 ```bash
 codex-container --mount /path/to/data
 codex-container --mount /path/to/data:/workspace/data:ro --mount ../shared
+```
+
+Publish ports (repeat the option for multiple ports):
+
+```bash
+codex-container --port 8080:3000
+codex-container -p 127.0.0.1:5432:5432 -p 5353:5353/udp
 ```
 
 Skip SSH mounting:

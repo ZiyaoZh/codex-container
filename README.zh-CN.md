@@ -66,7 +66,27 @@ codex-container
 codex-container codex
 ```
 
-第一个会话会创建具名容器，后续会话通过 `docker exec` 复用正在运行的容器，因此可以同时运行多个 Codex、Claude、Shell 或自定义命令进程。挂载相关参数由第一个会话决定，在该容器退出前，后续会话不能修改这些挂载配置。
+第一个会话会创建具名容器，后续会话通过 `docker exec` 复用正在运行的容器，因此可以同时运行多个 Codex、Claude、Shell 或自定义命令进程。目录挂载、端口映射等创建参数由第一个会话决定，在该容器退出前，后续会话不能修改这些配置。
+
+## 端口映射
+
+使用可重复传入的 `-p` 或 `--port` 参数，可以把容器端口映射到宿主机：
+
+```bash
+codex-container \
+  --port 8080:3000 \
+  --port 127.0.0.1:5432:5432
+```
+
+参数格式为：
+
+```text
+--port [HOST_IP:]HOST_PORT:CONTAINER_PORT[/tcp|udp]
+```
+
+端口必须是 `1` 到 `65535` 之间的整数，协议默认为 `tcp`。省略 `HOST_IP` 时，Docker 默认在宿主机所有网络接口上发布端口；仅需本机访问时，应显式使用 `127.0.0.1`。每组映射分别传入一次 `--port` 即可。
+
+端口映射由第一个会话确定。后续会话可以再次声明已经存在的映射，但不能给运行中的容器新增或修改映射。需要变更时，应退出使用该容器的所有会话，再用所需的 `--port` 参数重新启动。
 
 ## 额外挂载目录
 
@@ -316,6 +336,13 @@ codex-container --home ~/.cache/my-codex-home
 ```bash
 codex-container --mount /path/to/data
 codex-container --mount /path/to/data:/workspace/data:ro --mount ../shared
+```
+
+映射端口（多个端口时重复传入该参数）：
+
+```bash
+codex-container --port 8080:3000
+codex-container -p 127.0.0.1:5432:5432 -p 5353:5353/udp
 ```
 
 不挂载 SSH：

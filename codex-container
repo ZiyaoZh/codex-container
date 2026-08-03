@@ -15,6 +15,8 @@ Options:
   --home PATH            Persistent container home. Defaults to ~/.cache/codex-container/home.
   --mount SPEC           Mount an extra host directory. May be repeated.
                          SPEC: HOST_PATH[:CONTAINER_PATH[:ro|rw]]
+  -p, --port SPEC        Publish a container port. May be repeated.
+                         SPEC: [HOST_IP:]HOST_PORT:CONTAINER_PORT[/tcp|udp]
   --docker               Require Docker access through the host Docker socket.
   --no-docker            Do not mount the host Docker socket.
   --no-ssh               Do not mount ~/.ssh.
@@ -27,6 +29,7 @@ Examples:
   codex-container --agent claude
   codex-container --docker
   codex-container --mount /path/to/data --mount /path/to/config:/config:ro
+  codex-container --port 8080:3000 --port 127.0.0.1:5432:5432
   codex-container bash
   codex-container --repo /path/to/repo --agent claude
   CODEX_IMAGE=my-codex:dev codex-container
@@ -45,6 +48,7 @@ UPDATE_IMAGE=0
 
 command_args=()
 extra_mount_specs=()
+port_specs=()
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -80,6 +84,11 @@ while [[ "$#" -gt 0 ]]; do
     --mount)
       [[ "$#" -ge 2 ]] || { echo "Missing value for --mount" >&2; exit 2; }
       extra_mount_specs+=("$2")
+      shift 2
+      ;;
+    -p|--port)
+      [[ "$#" -ge 2 ]] || { echo "Missing value for --port" >&2; exit 2; }
+      port_specs+=("$2")
       shift 2
       ;;
     --docker)
@@ -169,6 +178,10 @@ DOCKER_MODE="none"
 extra_mount_sources=()
 extra_mount_targets=()
 extra_mount_modes=()
+port_host_ips=()
+port_host_ports=()
+port_container_ports=()
+port_protocols=()
 
 normalize_extra_mount() {
   local spec="$1"
@@ -225,6 +238,70 @@ normalize_extra_mount() {
 
 for extra_mount_spec in "${extra_mount_specs[@]}"; do
   normalize_extra_mount "$extra_mount_spec"
+done
+
+normalize_port_mapping() {
+  local spec="$1"
+  local address_part container_part host_ip host_port container_port protocol
+
+  address_part="${spec%:*}"
+  container_part="${spec##*:}"
+  host_ip=""
+
+  if [[ "$address_part" == "$spec" || -z "$address_part" || -z "$container_part" ]]; then
+    echo "Invalid port mapping: $spec" >&2
+    echo "Expected: [HOST_IP:]HOST_PORT:CONTAINER_PORT[/tcp|udp]" >&2
+    exit 2
+  fi
+
+  if [[ "$address_part" == *:* ]]; then
+    host_ip="${address_part%:*}"
+    host_port="${address_part##*:}"
+    if [[ -z "$host_ip" || "$host_ip" == *:* ]]; then
+      echo "Invalid host IP in port mapping: $spec" >&2
+      echo "Only IPv4 host addresses are supported." >&2
+      exit 2
+    fi
+  else
+    host_port="$address_part"
+  fi
+
+  protocol="tcp"
+  container_port="$container_part"
+  if [[ "$container_part" == */* ]]; then
+    container_port="${container_part%/*}"
+    protocol="${container_part##*/}"
+  fi
+
+  if [[ ! "$host_port" =~ ^[0-9]+$ ]] || (( 10#$host_port < 1 || 10#$host_port > 65535 )); then
+    echo "Invalid host port in mapping '$spec': $host_port" >&2
+    echo "Expected an integer from 1 to 65535." >&2
+    exit 2
+  fi
+
+  if [[ ! "$container_port" =~ ^[0-9]+$ ]] || (( 10#$container_port < 1 || 10#$container_port > 65535 )); then
+    echo "Invalid container port in mapping '$spec': $container_port" >&2
+    echo "Expected an integer from 1 to 65535." >&2
+    exit 2
+  fi
+
+  case "$protocol" in
+    tcp|udp) ;;
+    *)
+      echo "Invalid protocol in port mapping '$spec': $protocol" >&2
+      echo "Expected: tcp or udp" >&2
+      exit 2
+      ;;
+  esac
+
+  port_host_ips+=("$host_ip")
+  port_host_ports+=("$((10#$host_port))")
+  port_container_ports+=("$((10#$container_port))")
+  port_protocols+=("$protocol")
+}
+
+for port_spec in "${port_specs[@]}"; do
+  normalize_port_mapping "$port_spec"
 done
 
 if [[ "$MOUNT_DOCKER" == "auto" ]]; then
@@ -316,6 +393,44 @@ if container_running="$(docker inspect --format '{{.State.Running}}' "$CONTAINER
         echo "The running container does not have the requested extra mount: $CONTAINER_NAME" >&2
         echo "Requested: $requested_source:$requested_target:$requested_mode" >&2
         echo "Exit its active sessions, then start it again with the same --mount option." >&2
+        exit 1
+      fi
+    done
+  fi
+
+  if [[ "${#port_host_ports[@]}" -gt 0 ]]; then
+    existing_port_bindings="$(docker inspect \
+      --format '{{range $containerPort, $bindings := .HostConfig.PortBindings}}{{range $bindings}}{{printf "%s|%s|%s\n" $containerPort .HostIp .HostPort}}{{end}}{{end}}' \
+      "$CONTAINER_NAME")"
+
+    for index in "${!port_host_ports[@]}"; do
+      requested_host_ip="${port_host_ips[$index]}"
+      requested_host_port="${port_host_ports[$index]}"
+      requested_container_port="${port_container_ports[$index]}/${port_protocols[$index]}"
+      port_found=0
+
+      while IFS='|' read -r existing_container_port existing_host_ip existing_host_port; do
+        host_ip_matches=0
+        if [[ "$existing_host_ip" == "$requested_host_ip" \
+          || ( ( -z "$existing_host_ip" || "$existing_host_ip" == "0.0.0.0" ) \
+            && ( -z "$requested_host_ip" || "$requested_host_ip" == "0.0.0.0" ) ) ]]; then
+          host_ip_matches=1
+        fi
+
+        if [[ "$existing_container_port" == "$requested_container_port" \
+          && "$existing_host_port" == "$requested_host_port" \
+          && "$host_ip_matches" == "1" ]]; then
+          port_found=1
+          break
+        fi
+      done <<< "$existing_port_bindings"
+
+      if [[ "$port_found" == "0" ]]; then
+        requested_mapping="${requested_host_port}:${requested_container_port}"
+        [[ -n "$requested_host_ip" ]] && requested_mapping="${requested_host_ip}:${requested_mapping}"
+        echo "The running container does not have the requested port mapping: $CONTAINER_NAME" >&2
+        echo "Requested: $requested_mapping" >&2
+        echo "Exit its active sessions, then start it again with the same --port option." >&2
         exit 1
       fi
     done
@@ -419,6 +534,14 @@ for index in "${!extra_mount_sources[@]}"; do
   docker_args+=(
     -v "${extra_mount_sources[$index]}:${extra_mount_targets[$index]}:${extra_mount_modes[$index]}"
   )
+done
+
+for index in "${!port_host_ports[@]}"; do
+  port_mapping="${port_host_ports[$index]}:${port_container_ports[$index]}/${port_protocols[$index]}"
+  if [[ -n "${port_host_ips[$index]}" ]]; then
+    port_mapping="${port_host_ips[$index]}:${port_mapping}"
+  fi
+  docker_args+=(-p "$port_mapping")
 done
 
 docker_args+=("$IMAGE")
