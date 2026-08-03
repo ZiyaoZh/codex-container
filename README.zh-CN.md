@@ -243,6 +243,15 @@ CODEX_GID=$(id -g)
 
 这样可以避免容器在挂载的仓库中创建 root 所有的文件。
 
+`codex` 用户在容器内拥有免密 sudo 权限，可以按需安装额外的软件包，例如：
+
+```bash
+sudo apt update
+sudo apt install <package>
+```
+
+免密 sudo 也允许以 root 身份执行容器内的其他命令，因此只应在可信的仓库和 agent 会话中使用该容器。
+
 启用 Docker 能力后，入口脚本会读取 `/var/run/docker.sock` 的组 ID，并把 `codex` 用户加入对应的补充组。因此 agent 自身仍以 `codex` 用户运行，同时可以执行 Docker 命令。
 
 ## 以 root 运行
@@ -398,7 +407,7 @@ codex-container bash -lc 'gh auth status || gh auth login'
 ```bash
 mkdir -p /tmp/codex-container-test
 cd /tmp/codex-container-test
-codex-container bash -lc 'id && pwd && command -v codex && command -v claude && command -v gh && command -v rg && command -v fd && command -v node && command -v python3 && touch permission-test && ls -l permission-test'
+codex-container bash -lc 'id && pwd && command -v codex && command -v claude && command -v gh && command -v rg && command -v fd && command -v node && command -v python3 && sudo -n true && touch permission-test && ls -l permission-test'
 ```
 
 预期检查结果：
@@ -409,6 +418,7 @@ codex-container bash -lc 'id && pwd && command -v codex && command -v claude && 
 - `gh` 可用
 - `rg` 和 `fd` 可用
 - `node` 和 `python3` 可用
+- `sudo -n true` 可以无密码、无交互地执行成功
 - `permission-test` 属于宿主机用户 UID/GID，而不是 root
 
 宿主机 Docker socket 可用时，可以单独验证 Docker：

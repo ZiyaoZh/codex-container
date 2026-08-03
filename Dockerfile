@@ -43,6 +43,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xz-utils \
   && rm -rf /var/lib/apt/lists/*
 
+RUN groupadd --system codex-sudo \
+  && echo '%codex-sudo ALL=(ALL:ALL) NOPASSWD: ALL' \
+    > /etc/sudoers.d/codex-container \
+  && chmod 0440 /etc/sudoers.d/codex-container \
+  && visudo -cf /etc/sudoers.d/codex-container
+
 RUN install -d -m 0755 /etc/apt/keyrings \
   && curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
     -o /etc/apt/keyrings/docker.asc \

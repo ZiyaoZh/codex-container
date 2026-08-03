@@ -243,6 +243,15 @@ The container entrypoint creates a `codex` user with those IDs and runs the comm
 
 This prevents files created inside the mounted repository from becoming owned by root on the host.
 
+The `codex` user has passwordless sudo access inside the container. This allows installing additional packages when needed, for example:
+
+```bash
+sudo apt update
+sudo apt install <package>
+```
+
+Passwordless sudo also permits any other command to run as root inside the container. Only use the container with repositories and agent sessions you trust.
+
 When Docker access is enabled, the entrypoint reads the group ID of `/var/run/docker.sock` and adds the `codex` user to a matching supplementary group. This allows Docker commands while the agent itself continues to run as `codex`.
 
 ## Run As Root
@@ -398,7 +407,7 @@ After building the image:
 ```bash
 mkdir -p /tmp/codex-container-test
 cd /tmp/codex-container-test
-codex-container bash -lc 'id && pwd && command -v codex && command -v claude && command -v gh && command -v rg && command -v fd && command -v node && command -v python3 && touch permission-test && ls -l permission-test'
+codex-container bash -lc 'id && pwd && command -v codex && command -v claude && command -v gh && command -v rg && command -v fd && command -v node && command -v python3 && sudo -n true && touch permission-test && ls -l permission-test'
 ```
 
 Expected checks:
@@ -409,6 +418,7 @@ Expected checks:
 - `gh` is available
 - `rg` and `fd` are available
 - `node` and `python3` are available
+- `sudo -n true` succeeds without prompting for a password
 - `permission-test` is owned by the host user UID/GID, not root
 
 When the host Docker socket is available, verify Docker separately:

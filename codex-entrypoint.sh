@@ -34,6 +34,7 @@ if [[ "$(id -u)" == "0" ]]; then
     useradd -m -u "$CODEX_UID" -g "$CODEX_GID" -s /bin/bash "$CODEX_USER"
   fi
 
+  usermod -aG codex-sudo "$CODEX_USER"
   mkdir -p /workspace/repo "$CODEX_HOME/.cache" /cache
   chown "$CODEX_UID:$CODEX_GID" "$CODEX_HOME" "$CODEX_HOME/.cache" /cache || true
   configure_docker_socket_access
