@@ -68,6 +68,10 @@ codex-container codex
 
 第一个会话会创建具名容器，后续会话通过 `docker exec` 复用正在运行的容器，因此可以同时运行多个 Codex、Claude、Shell 或自定义命令进程。目录挂载、端口映射等创建参数由第一个会话决定，在该容器退出前，后续会话不能修改这些配置。
 
+默认容器名为 `codex-<仓库名>-<路径哈希>`，后缀取仓库真实绝对路径的 SHA-256 哈希前 12 位十六进制字符。因此，`/projects/abc` 和 `/projects/xyz/abc` 等同名目录会使用不同的容器名，而指向同一目录的相对路径和符号链接仍会复用同一个容器。可以通过 `--name` 或 `CODEX_CONTAINER_NAME` 手动指定名称。
+
+旧名称的容器会继续运行。需要连接同一仓库的旧容器时，使用 `--name <已有容器名>`；使用新的默认名称则会创建独立容器。
+
 ## 端口映射
 
 使用可重复传入的 `-p` 或 `--port` 参数，可以把容器端口映射到宿主机：
@@ -107,8 +111,6 @@ codex-container \
 省略 `CONTAINER_PATH` 时，该目录会按照宿主机上的绝对路径挂载到容器内。默认以 `rw` 模式读写挂载；对只读输入可使用 `ro`。`HOST_PATH` 可以是相对于启动器执行目录的路径，但目录必须已经存在。每个目录分别传入一次 `--mount` 即可。
 
 具名容器的额外挂载由第一个会话确定。后续会话可以再次声明已经存在的挂载，但不能给运行中的容器新增或修改挂载。需要变更时，应退出使用该容器的所有会话，再用所需的 `--mount` 参数重新启动。
-
-旧版启动器可能会在默认容器名末尾错误地追加一个 `-`。修复后的名称严格为 `codex-<仓库名>`，因此可以在旧容器仍运行时创建一个名称正确的新容器，用于迁移到新的挂载配置。
 
 ## 使用 Docker
 
@@ -379,7 +381,7 @@ codex-container --no-docker
 CODEX_IMAGE             Docker 镜像名。默认：codex-universal:latest
 CODEX_REPO_DIR          仓库目录。默认：当前目录
 CODEX_AGENT             启动的 agent：codex 或 claude。默认：codex
-CODEX_CONTAINER_NAME    容器名。默认：codex-<repo-name>
+CODEX_CONTAINER_NAME    容器名。默认：codex-<repo-name>-<path-hash>
 CODEX_CONTAINER_HOME    持久化 /home/codex 路径。默认：~/.cache/codex-container/home
 CODEX_CACHE_ROOT        缓存根目录。默认：~/.cache/codex-container
 CODEX_MOUNT_DOCKER      auto、1 或 0。默认：auto

@@ -68,6 +68,10 @@ codex-container codex
 
 The first session creates the named container. Later sessions reuse that running container with `docker exec`, so multiple Codex, Claude, shell, or custom command processes can run in it concurrently. Creation-time settings such as directory mounts and published ports are determined by the first session and cannot be changed by later sessions until that container exits.
 
+Default container names are `codex-<repo-name>-<path-hash>`. The suffix is the first 12 hexadecimal characters of the SHA-256 hash of the repository's canonical absolute path. This gives directories such as `/projects/abc` and `/projects/xyz/abc` different names, while relative paths and symbolic links to the same directory reuse the same container. Use `--name` or `CODEX_CONTAINER_NAME` to set an explicit name.
+
+Existing containers created under older names remain running. Use `--name <existing-name>` to reconnect to an older container for the same repository; the new default name creates a separate container.
+
 ## Port Mappings
 
 Use the repeatable `-p` or `--port` option to publish container ports on the host:
@@ -107,8 +111,6 @@ The accepted format is:
 When `CONTAINER_PATH` is omitted, the directory is mounted at the same absolute path inside the container. The default mode is `rw`; use `ro` for read-only inputs. `HOST_PATH` may be relative to the directory where the launcher is invoked, but the directory must already exist. Repeat `--mount` once per directory.
 
 Extra mounts are fixed when the named container is first created. A later session may request an existing mount, but it cannot add or change one. Exit all sessions using that container and start it again with the desired mount options to change them.
-
-Older launcher versions could append an unintended trailing `-` to the default container name. The corrected launcher uses `codex-<repo-name>` exactly, so it can create a clean replacement alongside an older running container whose name ends in `-`.
 
 ## Docker Access
 
@@ -379,7 +381,7 @@ The launcher also supports environment variables:
 CODEX_IMAGE             Docker image name. Default: codex-universal:latest
 CODEX_REPO_DIR          Repository directory. Default: current directory
 CODEX_AGENT             Agent to start: codex or claude. Default: codex
-CODEX_CONTAINER_NAME    Container name. Default: codex-<repo-name>
+CODEX_CONTAINER_NAME    Container name. Default: codex-<repo-name>-<path-hash>
 CODEX_CONTAINER_HOME    Persistent /home/codex path. Default: ~/.cache/codex-container/home
 CODEX_CACHE_ROOT        Cache root. Default: ~/.cache/codex-container
 CODEX_MOUNT_DOCKER      auto, 1, or 0. Default: auto

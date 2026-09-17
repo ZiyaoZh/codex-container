@@ -11,7 +11,7 @@ Options:
   --update               Rebuild the image and install the latest Codex CLI.
   --repo PATH            Mount PATH as the workspace. Defaults to the current directory.
   --image IMAGE          Docker image to run. Defaults to codex-universal:latest.
-  --name NAME            Container name. Defaults to codex-<repo-name>.
+  --name NAME            Container name. Defaults to codex-<repo-name>-<path-hash>.
   --home PATH            Persistent container home. Defaults to ~/.cache/codex-container/home.
   --mount SPEC           Mount an extra host directory. May be repeated.
                          SPEC: HOST_PATH[:CONTAINER_PATH[:ro|rw]]
@@ -165,10 +165,14 @@ if [[ ! -d "$REPO_DIR" ]]; then
   exit 1
 fi
 
-REPO_DIR="$(cd "$REPO_DIR" && pwd)"
-REPO_BASENAME="$(basename "$REPO_DIR")"
-REPO_NAME="$(printf '%s' "$REPO_BASENAME" | tr -c 'a-zA-Z0-9_.-' '-')"
-CONTAINER_NAME="${CONTAINER_NAME:-codex-${REPO_NAME}}"
+REPO_DIR="$(cd "$REPO_DIR" && pwd -P)"
+if [[ -z "$CONTAINER_NAME" ]]; then
+  REPO_BASENAME="$(basename "$REPO_DIR")"
+  REPO_NAME="$(printf '%s' "$REPO_BASENAME" | LC_ALL=C tr -c 'a-zA-Z0-9_.-' '-')"
+  # Keep names stable for the same path and distinct for repositories with the same basename.
+  REPO_PATH_HASH="$(printf '%s' "$REPO_DIR" | sha256sum)"
+  CONTAINER_NAME="codex-${REPO_NAME}-${REPO_PATH_HASH:0:12}"
+fi
 DEFAULT_CONTAINER_WORKDIR="/workspace/repo"
 CONTAINER_WORKDIR="$DEFAULT_CONTAINER_WORKDIR"
 CACHE_ROOT="${CODEX_CACHE_ROOT:-$HOME/.cache/codex-container}"
