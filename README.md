@@ -72,6 +72,39 @@ Default container names are `codex-<repo-name>-<path-hash>`. The suffix is the f
 
 Existing containers created under older names remain running. Use `--name <existing-name>` to reconnect to an older container for the same repository; the new default name creates a separate container.
 
+## List And Stop Containers
+
+List running containers started by this launcher, including their number, ID, name, status, and repository path:
+
+```bash
+codex-container list
+```
+
+Choose a container to stop:
+
+```bash
+codex-container down
+```
+
+In a terminal, `down` displays the list and accepts a row number, container name, or ID. Press Enter to stop the container for the current repository, or enter `q` to cancel. Without terminal input, it stops the current repository's container directly.
+
+You can also specify a name or ID directly, or use `--repo` to select another repository:
+
+```bash
+codex-container down my-codex-session
+codex-container down a1b2c3d4e5f6
+codex-container down --repo /path/to/repo
+codex-container down --name my-codex-session
+```
+
+`--list` and `--down` are aliases for `list` and `down`. An explicit name from `--name` or `CODEX_CONTAINER_NAME` skips the selection prompt; a positional name or ID takes precedence. Row numbers apply to the interactive list; use a name or ID for direct commands.
+
+When choosing by repository, `down` prefers its default container name. If that name is absent, it can stop a single matching container with an older or custom name. If multiple containers match, specify which one to stop. If none match, the command reports that and exits successfully.
+
+Stopping a container ends all sessions running in it. Containers created by the launcher use `--rm`, so Docker removes them after they stop; the repository, persistent home, and host caches remain. Both commands only manage running containers marked with this launcher's repository label, including sessions started with Claude or a shell.
+
+To run a command literally named `list` or `down` inside the container, use `codex-container -- list` or `codex-container -- down`.
+
 ## Port Mappings
 
 Use the repeatable `-p` or `--port` option to publish container ports on the host:
@@ -430,6 +463,12 @@ codex-container bash -lc 'gh auth status || gh auth login'
 The resulting state persists in the mounted host directories.
 
 ## Smoke Test
+
+Run the launcher regression tests without a Docker daemon:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
 
 After building the image:
 

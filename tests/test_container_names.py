@@ -10,6 +10,7 @@ import unittest
 
 LAUNCHER = Path(__file__).resolve().parents[1] / "codex-container"
 FAKE_DOCKER = r'''#!/usr/bin/env python3
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -19,15 +20,27 @@ state_path = Path(os.environ["FAKE_DOCKER_STATE"])
 state = json.loads(state_path.read_text()) if state_path.exists() else {}
 args = sys.argv[1:]
 action = args[0]
+with Path(os.environ["FAKE_DOCKER_LOG"]).open("a") as log:
+    log.write(json.dumps(args) + "\n")
 
-if action == "inspect":
+if action == "ps":
+    if os.environ.get("FAKE_DOCKER_PS_ERROR"):
+        sys.exit("Cannot connect to the Docker daemon")
+    filters = [args[i + 1] for i, arg in enumerate(args) if arg == "--filter"]
+    for name, container in state.items():
+        if not container.get("running", True):
+            continue
+        if "label=dev.codex-container.repo" in filters and "repo" not in container:
+            continue
+        print("\t".join((container["id"], name, "Up 2 minutes", container.get("repo", ""))))
+elif action == "inspect":
     name = args[-1]
     if name not in state:
         sys.exit(1)
     container = state[name]
     template = args[args.index("--format") + 1]
     if template == "{{.State.Running}}":
-        print("true")
+        print(str(container.get("running", True)).lower())
     elif '"dev.codex-container.repo"' in template:
         print(container["repo"])
     elif '"dev.codex-container.workdir"' in template:
@@ -43,6 +56,7 @@ elif action == "run":
     labels = dict(args[i + 1].split("=", 1)
                   for i, arg in enumerate(args) if arg == "--label")
     state[name] = {
+        "id": hashlib.sha256(name.encode()).hexdigest(),
         "repo": labels["dev.codex-container.repo"],
         "workdir": labels["dev.codex-container.workdir"],
         "mounts": [args[i + 1] for i, arg in enumerate(args) if arg == "-v"],
@@ -52,12 +66,23 @@ elif action == "run":
 elif action == "exec":
     name = args[args.index("gosu") - 1]
     print(json.dumps({"action": action, "name": name, **state[name]}))
+elif action == "stop":
+    if os.environ.get("FAKE_DOCKER_STOP_ERROR"):
+        sys.exit("Docker failed to stop the container")
+    target = args[-1]
+    name = next((name for name, container in state.items()
+                 if target in (name, container["id"])), None)
+    if name is None:
+        sys.exit("No such container: " + target)
+    del state[name]
+    state_path.write_text(json.dumps(state))
+    print(target)
 else:
     sys.exit("Unexpected Docker command: " + action)
 '''
 
 
-class ContainerNameTests(unittest.TestCase):
+class LauncherTestCase(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="codex-container-test-")
         self.addCleanup(temporary.cleanup)
@@ -66,6 +91,8 @@ class ContainerNameTests(unittest.TestCase):
         self.other_repo = self.root / "xyz" / "abc"
         self.repo.mkdir()
         self.other_repo.mkdir(parents=True)
+        self.state_path = self.root / "containers.json"
+        self.log_path = self.root / "docker-calls.jsonl"
         bin_dir = self.root / "bin"
         bin_dir.mkdir()
         # Suppress host config/cache directory creation during these dry runs.
@@ -77,14 +104,16 @@ class ContainerNameTests(unittest.TestCase):
                     if not key.startswith("CODEX_")}
         self.env.update({
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-            "FAKE_DOCKER_STATE": str(self.root / "containers.json"),
+            "FAKE_DOCKER_STATE": str(self.state_path),
+            "FAKE_DOCKER_LOG": str(self.log_path),
         })
 
-    def invoke(self, *args, cwd=None, variables=None):
+    def invoke(self, *args, cwd=None, variables=None, stdin=subprocess.DEVNULL):
         return subprocess.run(
             [str(LAUNCHER), "--no-docker", *args],
             cwd=cwd or self.repo,
             env={**self.env, **(variables or {})},
+            stdin=stdin,
             capture_output=True,
             text=True,
             timeout=10,
@@ -95,6 +124,15 @@ class ContainerNameTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
+    def state(self):
+        return json.loads(self.state_path.read_text()) if self.state_path.exists() else {}
+
+    def docker_calls(self):
+        return [json.loads(line) for line in self.log_path.read_text().splitlines()] \
+            if self.log_path.exists() else []
+
+
+class ContainerNameTests(LauncherTestCase):
     def test_same_basename_in_different_directories_creates_separate_containers(self):
         first = self.launch()
         second = self.launch(cwd=self.other_repo)

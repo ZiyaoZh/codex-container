@@ -72,6 +72,39 @@ codex-container codex
 
 旧名称的容器会继续运行。需要连接同一仓库的旧容器时，使用 `--name <已有容器名>`；使用新的默认名称则会创建独立容器。
 
+## 列出和停止容器
+
+列出由此启动器创建且仍在运行的容器，显示序号、ID、名称、状态和仓库路径：
+
+```bash
+codex-container list
+```
+
+选择要停止的容器：
+
+```bash
+codex-container down
+```
+
+在终端中，`down` 会显示列表，可以输入序号、容器名或 ID。直接按回车默认停止当前仓库对应的容器，输入 `q` 取消。非终端输入环境下，会直接停止当前仓库的容器。
+
+也可以直接指定容器名或 ID，或通过 `--repo` 指定另一个仓库：
+
+```bash
+codex-container down my-codex-session
+codex-container down a1b2c3d4e5f6
+codex-container down --repo /path/to/repo
+codex-container down --name my-codex-session
+```
+
+`--list` 和 `--down` 分别是 `list` 和 `down` 的别名。通过 `--name` 或 `CODEX_CONTAINER_NAME` 指定名称时，会跳过交互选择；直接传入的容器名或 ID 优先级更高。序号仅用于交互列表，直接执行命令时应使用容器名或 ID。
+
+按仓库选择时，`down` 优先使用该仓库的默认容器名。如果默认名称不存在，也能找到该路径下唯一的旧名称或自定义名称容器；匹配到多个时，需要明确指定目标。没有匹配的运行中容器时，会给出提示并正常退出。
+
+停止容器会结束其中的所有会话。启动器创建的容器使用 `--rm`，停止后会由 Docker 自动删除；仓库、持久化 home 和宿主机缓存会保留。这两个命令仅管理带有启动器仓库标记的运行中容器，也包括使用 Claude 或 Shell 启动的会话。
+
+如果需要在容器内运行名称恰好为 `list` 或 `down` 的命令，使用 `codex-container -- list` 或 `codex-container -- down`。
+
 ## 端口映射
 
 使用可重复传入的 `-p` 或 `--port` 参数，可以把容器端口映射到宿主机：
@@ -430,6 +463,12 @@ codex-container bash -lc 'gh auth status || gh auth login'
 登录后的状态会保存在挂载的宿主机目录中。
 
 ## 冒烟测试
+
+无需 Docker daemon 即可运行启动器回归测试：
+
+```bash
+python3 -m unittest discover -s tests -v
+```
 
 构建镜像后可以运行：
 

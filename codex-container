@@ -5,6 +5,13 @@ usage() {
   cat <<'EOF'
 Usage:
   codex-container [options] [command...]
+  codex-container [options] list
+  codex-container [options] down [NAME|ID]
+
+Commands:
+  list, --list           List running Codex containers and their repository paths.
+  down, --down           Stop a container by name or ID, or select one interactively.
+                        Enter (or non-interactive use) defaults to the current repo.
 
 Options:
   --agent codex|claude   Start the selected coding agent. Defaults to codex.
@@ -25,6 +32,9 @@ Options:
 
 Examples:
   codex-container
+  codex-container list
+  codex-container down
+  codex-container down my-codex-session
   codex-container --update
   codex-container --agent claude
   codex-container --docker
@@ -45,6 +55,7 @@ MOUNT_SSH=1
 MOUNT_GITCONFIG=1
 CONTAINER_HOME="${CODEX_CONTAINER_HOME:-}"
 UPDATE_IMAGE=0
+ACTION="run"
 
 command_args=()
 extra_mount_specs=()
@@ -52,6 +63,14 @@ port_specs=()
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
+    list|--list|down|--down)
+      if [[ "$ACTION" != "run" ]]; then
+        echo "Specify only one list or down command." >&2
+        exit 2
+      fi
+      ACTION="${1#--}"
+      shift
+      ;;
     --agent)
       [[ "$#" -ge 2 ]] || { echo "Missing value for --agent" >&2; exit 2; }
       AGENT="$2"
@@ -123,6 +142,164 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
+resolve_repository() {
+  if [[ ! -d "$REPO_DIR" ]]; then
+    echo "Repo directory does not exist: $REPO_DIR" >&2
+    exit 1
+  fi
+
+  REPO_DIR="$(cd "$REPO_DIR" && pwd -P)"
+  if [[ -z "$CONTAINER_NAME" ]]; then
+    local repo_basename repo_name repo_path_hash
+    repo_basename="$(basename "$REPO_DIR")"
+    repo_name="$(printf '%s' "$repo_basename" | LC_ALL=C tr -c 'a-zA-Z0-9_.-' '-')"
+    # Keep names stable for the same path and distinct for repositories with the same basename.
+    repo_path_hash="$(printf '%s' "$REPO_DIR" | sha256sum)"
+    CONTAINER_NAME="codex-${repo_name}-${repo_path_hash:0:12}"
+  fi
+}
+
+load_running_containers() {
+  local rows container_id name status repo
+  rows="$(docker ps --filter 'label=dev.codex-container.repo' --no-trunc \
+    --format '{{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Label "dev.codex-container.repo"}}')"
+  managed_ids=()
+  managed_names=()
+  managed_statuses=()
+  managed_repos=()
+  while IFS=$'\t' read -r container_id name status repo; do
+    [[ -n "$container_id" ]] || continue
+    managed_ids+=("$container_id")
+    managed_names+=("$name")
+    managed_statuses+=("$status")
+    managed_repos+=("$repo")
+  done <<< "$rows"
+}
+
+print_running_containers() {
+  local index
+  if [[ "${#managed_ids[@]}" -eq 0 ]]; then
+    echo "No running Codex containers."
+    return
+  fi
+
+  printf '%-4s %-12s %-36s %-20s %s\n' '#' ID NAME STATUS REPOSITORY
+  for index in "${!managed_ids[@]}"; do
+    printf '%-4s %-12s %-36s %-20s %s\n' "$((index + 1))" \
+      "${managed_ids[$index]:0:12}" "${managed_names[$index]}" \
+      "${managed_statuses[$index]}" "${managed_repos[$index]}"
+  done
+}
+
+find_container_index() {
+  local target="$1" index selected_index=""
+  for index in "${!managed_ids[@]}"; do
+    if [[ "${managed_names[$index]}" == "$target" ]]; then
+      printf '%s\n' "$index"
+      return
+    fi
+  done
+  for index in "${!managed_ids[@]}"; do
+    if [[ "${managed_ids[$index]}" == "$target"* ]]; then
+      if [[ -n "$selected_index" ]]; then
+        echo "Container ID is ambiguous: $target" >&2
+        return 1
+      fi
+      selected_index="$index"
+    fi
+  done
+  if [[ -z "$selected_index" ]]; then
+    echo "No running Codex container matches: $target" >&2
+    return 1
+  fi
+  printf '%s\n' "$selected_index"
+}
+
+down_container() {
+  local target="${command_args[0]:-$CONTAINER_NAME}" selection="" selected_index=""
+  local index match_count=0
+  load_running_containers
+
+  if [[ -n "$target" ]]; then
+    selected_index="$(find_container_index "$target")"
+  else
+    resolve_repository
+    if [[ -t 0 && "${#managed_ids[@]}" -gt 0 ]]; then
+      print_running_containers
+      if ! read -r -p "Container number/name/ID [Enter: $REPO_DIR; q: cancel]: " selection; then
+        echo "Cancelled."
+        return
+      fi
+      case "$selection" in
+        q|Q) echo "Cancelled."; return ;;
+      esac
+      if [[ "$selection" =~ ^[0-9]+$ ]]; then
+        for index in "${!managed_ids[@]}"; do
+          if [[ "$selection" == "$((index + 1))" ]]; then
+            selected_index="$index"
+            break
+          fi
+        done
+        if [[ -z "$selected_index" ]]; then
+          selected_index="$(find_container_index "$selection")"
+        fi
+      elif [[ -n "$selection" ]]; then
+        selected_index="$(find_container_index "$selection")"
+      fi
+    fi
+
+    if [[ -z "$selected_index" ]]; then
+      for index in "${!managed_ids[@]}"; do
+        if [[ "${managed_repos[$index]}" == "$REPO_DIR" ]]; then
+          selected_index="$index"
+          match_count=$((match_count + 1))
+          if [[ "${managed_names[$index]}" == "$CONTAINER_NAME" ]]; then
+            match_count=1
+            break
+          fi
+        fi
+      done
+      if [[ "$match_count" -gt 1 ]]; then
+        echo "Multiple running Codex containers for repository: $REPO_DIR" >&2
+        echo "Choose one with: codex-container down NAME or ID" >&2
+        return 1
+      fi
+      if [[ -z "$selected_index" ]]; then
+        echo "No running Codex container for repository: $REPO_DIR"
+        return
+      fi
+    fi
+  fi
+
+  echo "Stopping container: ${managed_names[$selected_index]}"
+  docker stop -- "${managed_ids[$selected_index]}"
+}
+
+if [[ "$ACTION" != "run" && "$UPDATE_IMAGE" == "1" ]]; then
+  echo "--update cannot be combined with list or down." >&2
+  exit 2
+fi
+
+case "$ACTION" in
+  list)
+    if [[ "${#command_args[@]}" -gt 0 ]]; then
+      echo "list does not accept a container command or name." >&2
+      exit 2
+    fi
+    load_running_containers
+    print_running_containers
+    exit 0
+    ;;
+  down)
+    if [[ "${#command_args[@]}" -gt 1 ]]; then
+      echo "Usage: codex-container [options] down [NAME|ID]" >&2
+      exit 2
+    fi
+    down_container
+    exit 0
+    ;;
+esac
+
 case "$MOUNT_DOCKER" in
   auto|0|1) ;;
   *)
@@ -160,19 +337,7 @@ case "$AGENT" in
     ;;
 esac
 
-if [[ ! -d "$REPO_DIR" ]]; then
-  echo "Repo directory does not exist: $REPO_DIR" >&2
-  exit 1
-fi
-
-REPO_DIR="$(cd "$REPO_DIR" && pwd -P)"
-if [[ -z "$CONTAINER_NAME" ]]; then
-  REPO_BASENAME="$(basename "$REPO_DIR")"
-  REPO_NAME="$(printf '%s' "$REPO_BASENAME" | LC_ALL=C tr -c 'a-zA-Z0-9_.-' '-')"
-  # Keep names stable for the same path and distinct for repositories with the same basename.
-  REPO_PATH_HASH="$(printf '%s' "$REPO_DIR" | sha256sum)"
-  CONTAINER_NAME="codex-${REPO_NAME}-${REPO_PATH_HASH:0:12}"
-fi
+resolve_repository
 DEFAULT_CONTAINER_WORKDIR="/workspace/repo"
 CONTAINER_WORKDIR="$DEFAULT_CONTAINER_WORKDIR"
 CACHE_ROOT="${CODEX_CACHE_ROOT:-$HOME/.cache/codex-container}"
