@@ -657,11 +657,10 @@ mkdir -p \
   "$HOME/.claude" \
   "$HOME/.config/gh" \
   "$CACHE_ROOT"/{npm,pip,cargo,go,maven,gradle,cache} \
-  "$CONTAINER_HOME"/{.cache,.config}
+  "$CONTAINER_HOME"/{.cache,.config,.codex}
 
 docker_args+=(
   -v "$CONTAINER_HOME:/home/codex"
-  -v "$HOME/.codex:/home/codex/.codex"
   -v "$HOME/.claude:/home/codex/.claude"
   -v "$HOME/.config/gh:/home/codex/.config/gh"
   -v "$CACHE_ROOT/npm:/home/codex/.npm"
@@ -672,6 +671,48 @@ docker_args+=(
   -v "$CACHE_ROOT/gradle:/home/codex/.gradle"
   -v "$CACHE_ROOT/cache:/cache"
 )
+
+# Keep user configuration and extensions while leaving the container-owned
+# daemon installation and app-server socket in the persistent container home.
+# Mounting the entire host directory would also bring in absolute symlinks and
+# the host app-server socket, which cannot be reused safely in the container.
+mount_codex_file() {
+  local name="$1"
+  local source="$HOME/.codex/$name"
+  [[ -f "$source" ]] || return 0
+  touch "$CONTAINER_HOME/.codex/$name"
+  docker_args+=(-v "$source:/home/codex/.codex/$name")
+}
+
+mount_codex_dir() {
+  local name="$1"
+  local source="$HOME/.codex/$name"
+  [[ -d "$source" ]] || return 0
+  mkdir -p "$CONTAINER_HOME/.codex/$name"
+  docker_args+=(-v "$source:/home/codex/.codex/$name")
+}
+
+mount_codex_file auth.json
+mount_codex_file config.toml
+mount_codex_file version.json
+mount_codex_file history.jsonl
+mount_codex_file session_index.jsonl
+mount_codex_file models_cache.json
+for codex_database in \
+  goals_1.sqlite goals_1.sqlite-shm goals_1.sqlite-wal \
+  logs_2.sqlite logs_2.sqlite-shm logs_2.sqlite-wal \
+  memories_1.sqlite memories_1.sqlite-shm memories_1.sqlite-wal \
+  queue_1.sqlite queue_1.sqlite-shm queue_1.sqlite-wal \
+  state_5.sqlite state_5.sqlite-shm state_5.sqlite-wal \
+  thread_history_1.sqlite thread_history_1.sqlite-shm thread_history_1.sqlite-wal; do
+  mount_codex_file "$codex_database"
+done
+mount_codex_dir skills
+mount_codex_dir plugins
+mount_codex_dir sessions
+mount_codex_dir attachments
+mount_codex_dir shell_snapshots
+mount_codex_dir tui-thread-reference-capabilities
 
 if [[ "$MOUNT_SSH" == "1" ]]; then
   mount_if_exists "$HOME/.ssh" "/home/codex/.ssh" "ro"

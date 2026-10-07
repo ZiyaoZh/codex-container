@@ -1,4 +1,7 @@
-FROM ubuntu:22.04
+# Ubuntu 24.04 ships Python 3.12 as its system Python.  Project virtual
+# environments may contain an absolute link to /usr/bin/python3.12, so the
+# image must provide that interpreter rather than the Python 3.10 from 22.04.
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CODEX_NON_INTERACTIVE=1
@@ -28,8 +31,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     procps \
     python3 \
+    python3.12 \
     python3-pip \
     python3-venv \
+    python3.12-venv \
     ripgrep \
     rsync \
     sqlite3 \
@@ -42,6 +47,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip \
     xz-utils \
   && rm -rf /var/lib/apt/lists/*
+
+# Keep the image contract explicit: venvs created against Python 3.12 must be
+# usable inside the container.
+RUN test -x /usr/bin/python3.12 \
+  && python3.12 --version \
+  && python3.12 -m venv --clear /tmp/python312-venv \
+  && /tmp/python312-venv/bin/python --version \
+  && rm -rf /tmp/python312-venv
 
 RUN groupadd --system codex-sudo \
   && echo '%codex-sudo ALL=(ALL:ALL) NOPASSWD: ALL' \
@@ -96,7 +109,10 @@ ARG CODEX_CACHE_BUST=0
 RUN echo "Installing Codex ${CODEX_VERSION} (cache bust: ${CODEX_CACHE_BUST})" \
   && npm install -g "@openai/codex@${CODEX_VERSION}"
 
-RUN pip3 install --no-cache-dir beautifulsoup4 httpx ruff pytest requests
+# Ubuntu 24.04 marks the system Python as externally managed (PEP 668).
+# These are image-provided CLI tools, so install them into that environment.
+RUN pip3 install --break-system-packages --no-cache-dir \
+    beautifulsoup4 httpx ruff pytest requests
 
 RUN ln -sf /usr/bin/fdfind /usr/local/bin/fd
 

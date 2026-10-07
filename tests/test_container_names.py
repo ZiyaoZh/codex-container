@@ -133,6 +133,21 @@ class LauncherTestCase(unittest.TestCase):
 
 
 class ContainerNameTests(LauncherTestCase):
+    def test_codex_configuration_is_mounted_without_host_daemon_state(self):
+        host_home = self.root / "host-home"
+        host_codex_path = host_home / ".codex"
+        host_codex_path.mkdir(parents=True)
+        (host_codex_path / "config.toml").write_text("model = 'test'\n")
+        (host_codex_path / "auth.json").write_text("{}\n")
+        (host_codex_path / "history.jsonl").write_text("{}\n")
+        (host_home / ".cache" / "codex-container" / "home" / ".codex").mkdir(parents=True)
+        container = self.launch(variables={"HOME": str(host_home)})
+        host_codex = str(host_codex_path)
+        self.assertIn(f"{host_codex}/config.toml:/home/codex/.codex/config.toml", container["mounts"])
+        self.assertIn(f"{host_codex}/auth.json:/home/codex/.codex/auth.json", container["mounts"])
+        self.assertIn(f"{host_codex}/history.jsonl:/home/codex/.codex/history.jsonl", container["mounts"])
+        self.assertNotIn(f"{host_codex}:/home/codex/.codex", container["mounts"])
+
     def test_same_basename_in_different_directories_creates_separate_containers(self):
         first = self.launch()
         second = self.launch(cwd=self.other_repo)

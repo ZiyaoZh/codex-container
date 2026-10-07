@@ -256,7 +256,9 @@ The launcher mounts these host paths when available:
 ```text
 current repo                          -> /workspace/repo
 ~/.cache/codex-container/home          -> /home/codex
-~/.codex                               -> /home/codex/.codex
+~/.codex/{auth.json,config.toml,version.json} -> /home/codex/.codex/{...}
+~/.codex/{skills,plugins}              -> /home/codex/.codex/{skills,plugins}
+~/.codex/{history,session databases,sessions} -> /home/codex/.codex/{...}
 ~/.claude                              -> /home/codex/.claude
 ~/.config/gh                           -> /home/codex/.config/gh
 ~/.ssh                                 -> /home/codex/.ssh:ro

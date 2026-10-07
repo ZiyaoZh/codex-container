@@ -256,7 +256,9 @@ Codex 用户的 UID/GID，使浏览器测试工具无需 root 权限即可写入
 ```text
 当前仓库                               -> /workspace/repo
 ~/.cache/codex-container/home          -> /home/codex
-~/.codex                               -> /home/codex/.codex
+~/.codex/{auth.json,config.toml,version.json} -> /home/codex/.codex/{...}
+~/.codex/{skills,plugins}              -> /home/codex/.codex/{skills,plugins}
+~/.codex/{历史文件、会话数据库、sessions} -> /home/codex/.codex/{...}
 ~/.claude                              -> /home/codex/.claude
 ~/.config/gh                           -> /home/codex/.config/gh
 ~/.ssh                                 -> /home/codex/.ssh:ro
