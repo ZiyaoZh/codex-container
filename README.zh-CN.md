@@ -258,7 +258,8 @@ Codex 用户的 UID/GID，使浏览器测试工具无需 root 权限即可写入
 ~/.cache/codex-container/home          -> /home/codex
 ~/.codex/{auth.json,config.toml,version.json} -> /home/codex/.codex/{...}
 ~/.codex/{skills,plugins}              -> /home/codex/.codex/{skills,plugins}
-~/.codex/{历史文件、会话数据库、sessions} -> /home/codex/.codex/{...}
+~/.codex/{history.jsonl,session_index.jsonl,models_cache.json} -> /home/codex/.codex/{...}
+~/.codex/{sessions,attachments,shell_snapshots,tui-thread-reference-capabilities} -> /home/codex/.codex/{...}
 ~/.claude                              -> /home/codex/.claude
 ~/.config/gh                           -> /home/codex/.config/gh
 ~/.ssh                                 -> /home/codex/.ssh:ro
@@ -274,6 +275,17 @@ Codex 用户的 UID/GID，使浏览器测试工具无需 root 权限即可写入
 ~/.cache/codex-container/gradle        -> /home/codex/.gradle
 ~/.cache/codex-container/cache         -> /cache
 ```
+
+SQLite 数据库及其 `-wal`、`-shm` 文件保留在容器的持久化 home 中
+（默认是 `~/.cache/codex-container/home/.codex`，也可以通过 `--home` 指定），
+不与宿主机 Codex 共用。逐个挂载数据库文件会阻碍 SQLite 管理配套文件，
+也会导致 Codex 备份损坏数据库时无法重命名文件，启动时报 `Device or resource busy`。
+宿主机会话目录仍然共享，Codex 可以根据保存的会话重建本地状态索引。
+
+从旧版启动器升级后，先退出相关容器的活动会话，在对应仓库执行 `codex-container down`
+（也可以指定容器名称），再使用原来的参数启动。其他旧容器也需要分别重建。
+启动器会拒绝复用仍有旧版 SQLite 文件挂载的容器。这次只修改启动器，无需重建镜像。
+宿主机数据库不会被修改，已有的容器本地数据库也会保留；这项修改不会修复已经损坏的容器本地数据库。
 
 启用宿主机 Docker socket 时还会增加以下挂载：
 

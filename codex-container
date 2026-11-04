@@ -509,6 +509,20 @@ if container_running="$(docker inspect --format '{{.State.Running}}' "$CONTAINER
     exit 1
   fi
 
+  existing_mount_targets="$(docker inspect \
+    --format '{{range .Mounts}}{{println .Destination}}{{end}}' \
+    "$CONTAINER_NAME")"
+  while IFS= read -r existing_target; do
+    case "$existing_target" in
+      /home/codex/.codex/*.sqlite|/home/codex/.codex/*.sqlite-wal|/home/codex/.codex/*.sqlite-shm)
+        echo "The running container has an obsolete SQLite file mount: $existing_target" >&2
+        echo "Exit its active sessions, then run: codex-container down $CONTAINER_NAME" >&2
+        echo "Start it again with this launcher to use container-owned databases." >&2
+        exit 1
+        ;;
+    esac
+  done <<< "$existing_mount_targets"
+
   existing_workdir="$(docker inspect \
     --format '{{with index .Config.Labels "dev.codex-container.workdir"}}{{.}}{{end}}' \
     "$CONTAINER_NAME")"
@@ -673,7 +687,9 @@ docker_args+=(
 )
 
 # Keep user configuration and extensions while leaving the container-owned
-# daemon installation and app-server socket in the persistent container home.
+# databases, daemon installation and app-server socket in the persistent home.
+# SQLite files (including WAL/SHM) must remain ordinary files so SQLite can
+# manage sidecars and Codex can rename damaged databases during recovery.
 # Mounting the entire host directory would also bring in absolute symlinks and
 # the host app-server socket, which cannot be reused safely in the container.
 mount_codex_file() {
@@ -698,15 +714,6 @@ mount_codex_file version.json
 mount_codex_file history.jsonl
 mount_codex_file session_index.jsonl
 mount_codex_file models_cache.json
-for codex_database in \
-  goals_1.sqlite goals_1.sqlite-shm goals_1.sqlite-wal \
-  logs_2.sqlite logs_2.sqlite-shm logs_2.sqlite-wal \
-  memories_1.sqlite memories_1.sqlite-shm memories_1.sqlite-wal \
-  queue_1.sqlite queue_1.sqlite-shm queue_1.sqlite-wal \
-  state_5.sqlite state_5.sqlite-shm state_5.sqlite-wal \
-  thread_history_1.sqlite thread_history_1.sqlite-shm thread_history_1.sqlite-wal; do
-  mount_codex_file "$codex_database"
-done
 mount_codex_dir skills
 mount_codex_dir plugins
 mount_codex_dir sessions

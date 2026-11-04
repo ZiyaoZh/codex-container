@@ -45,6 +45,9 @@ elif action == "inspect":
         print(container["repo"])
     elif '"dev.codex-container.workdir"' in template:
         print(container["workdir"])
+    elif template == '{{range .Mounts}}{{println .Destination}}{{end}}':
+        for mount in container.get("mounts", []):
+            print(mount.split(":")[1])
     elif '"/var/run/docker.sock"' in template:
         print("")
     else:
@@ -103,6 +106,7 @@ class LauncherTestCase(unittest.TestCase):
         self.env = {key: value for key, value in os.environ.items()
                     if not key.startswith("CODEX_")}
         self.env.update({
+            "HOME": str(self.root / "home"),
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             "FAKE_DOCKER_STATE": str(self.state_path),
             "FAKE_DOCKER_LOG": str(self.log_path),
@@ -133,6 +137,45 @@ class LauncherTestCase(unittest.TestCase):
 
 
 class ContainerNameTests(LauncherTestCase):
+    def test_host_sqlite_databases_and_sidecars_are_not_mounted(self):
+        host_home = self.root / "host-home"
+        host_codex = host_home / ".codex"
+        host_codex.mkdir(parents=True)
+        container_codex = host_home / ".cache/codex-container/home/.codex"
+        container_codex.mkdir(parents=True)
+        for database in ("goals_1", "logs_2", "memories_1", "queue_1",
+                         "state_5", "thread_history_1", "future_99"):
+            for suffix in (".sqlite", ".sqlite-wal", ".sqlite-shm"):
+                (host_codex / (database + suffix)).write_bytes(b"host database")
+        local_database = container_codex / "state_5.sqlite"
+        local_database.write_bytes(b"existing container database")
+        container = self.launch(variables={"HOME": str(host_home)})
+        self.assertIn(f"{container_codex.parent}:/home/codex", container["mounts"])
+        self.assertFalse(any(".sqlite" in mount for mount in container["mounts"]))
+        self.assertEqual(local_database.read_bytes(), b"existing container database")
+        self.assertTrue(all(path.read_bytes() == b"host database"
+                            for path in host_codex.iterdir()))
+
+    def test_legacy_sqlite_mount_requires_recreation_before_exec(self):
+        created = self.launch()
+        for suffix in (".sqlite", ".sqlite-wal", ".sqlite-shm"):
+            with self.subTest(suffix=suffix):
+                state = self.state()
+                state[created["name"]]["mounts"] = [
+                    f"/host/state_5{suffix}:/home/codex/.codex/state_5{suffix}"]
+                self.state_path.write_text(json.dumps(state))
+                before = len(self.docker_calls())
+                result = self.invoke()
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("obsolete SQLite file mount", result.stderr)
+                self.assertIn(f"codex-container down {created['name']}", result.stderr)
+                self.assertFalse(any(call[0] == "exec"
+                                     for call in self.docker_calls()[before:]))
+        stopped = self.invoke("down", created["name"])
+        self.assertEqual(stopped.returncode, 0, stopped.stderr)
+        self.assertEqual(self.launch()["action"], "run")
+        self.assertEqual(self.launch()["action"], "exec")
+
     def test_codex_configuration_is_mounted_without_host_daemon_state(self):
         host_home = self.root / "host-home"
         host_codex_path = host_home / ".codex"

@@ -258,7 +258,8 @@ current repo                          -> /workspace/repo
 ~/.cache/codex-container/home          -> /home/codex
 ~/.codex/{auth.json,config.toml,version.json} -> /home/codex/.codex/{...}
 ~/.codex/{skills,plugins}              -> /home/codex/.codex/{skills,plugins}
-~/.codex/{history,session databases,sessions} -> /home/codex/.codex/{...}
+~/.codex/{history.jsonl,session_index.jsonl,models_cache.json} -> /home/codex/.codex/{...}
+~/.codex/{sessions,attachments,shell_snapshots,tui-thread-reference-capabilities} -> /home/codex/.codex/{...}
 ~/.claude                              -> /home/codex/.claude
 ~/.config/gh                           -> /home/codex/.config/gh
 ~/.ssh                                 -> /home/codex/.ssh:ro
@@ -274,6 +275,21 @@ current repo                          -> /workspace/repo
 ~/.cache/codex-container/gradle        -> /home/codex/.gradle
 ~/.cache/codex-container/cache         -> /cache
 ```
+
+SQLite databases and their `-wal`/`-shm` files stay in the persistent container home
+(`~/.cache/codex-container/home/.codex`, or the home selected with `--home`). They
+are not shared with host Codex. Individual database mounts prevent SQLite sidecar
+management and Codex's damaged-database backup from renaming files, causing
+`Device or resource busy` during startup. Host session directories remain shared;
+Codex can rebuild its local state index from saved sessions.
+
+After upgrading from a launcher that mounted SQLite files, exit active sessions,
+run `codex-container down` in the affected repository (or pass the container name),
+then launch again with the same options. Repeat for other old containers. The
+launcher refuses to reuse containers with obsolete SQLite mounts. No image rebuild
+is needed for this launcher change. Host databases are left untouched, and existing
+container-local databases are preserved; this change does not repair an already
+damaged container-local database.
 
 When the host Docker socket is enabled, the launcher additionally mounts:
 
