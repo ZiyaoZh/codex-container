@@ -3,8 +3,9 @@ set -euo pipefail
 
 CODEX_UID="${CODEX_UID:-1000}"
 CODEX_GID="${CODEX_GID:-1000}"
-CODEX_USER="${CODEX_USER:-codex}"
-CODEX_HOME="${CODEX_HOME:-/home/codex}"
+CODEX_USER="${CODEX_USER:-user}"
+CONTAINER_USER_HOME="${CONTAINER_USER_HOME:-/home/$CODEX_USER}"
+export CODEX_HOME="${CODEX_HOME:-$CONTAINER_USER_HOME/.codex}"
 
 configure_docker_socket_access() {
   [[ -S /var/run/docker.sock ]] || return 0
@@ -31,15 +32,21 @@ if [[ "$(id -u)" == "0" ]]; then
   fi
 
   if ! id -u "$CODEX_USER" >/dev/null 2>&1; then
-    useradd -m -u "$CODEX_UID" -g "$CODEX_GID" -s /bin/bash "$CODEX_USER"
+    useradd -M -d "$CONTAINER_USER_HOME" -u "$CODEX_UID" -g "$CODEX_GID" -s /bin/bash "$CODEX_USER"
   fi
 
+  if [[ "$(id -u "$CODEX_USER")" != "$CODEX_UID" || "$(id -g "$CODEX_USER")" != "$CODEX_GID" ]]; then
+    echo "Container user $CODEX_USER does not match requested UID/GID" >&2
+    exit 1
+  fi
+  usermod -d "$CONTAINER_USER_HOME" "$CODEX_USER"
   usermod -aG codex-sudo "$CODEX_USER"
-  mkdir -p /workspace/repo "$CODEX_HOME/.cache" /cache
-  chown "$CODEX_UID:$CODEX_GID" "$CODEX_HOME" "$CODEX_HOME/.cache" /cache || true
+  mkdir -p /workspace/repo "$CONTAINER_USER_HOME/.cache" /cache
+  chown "$CODEX_UID:$CODEX_GID" "$CONTAINER_USER_HOME" "$CONTAINER_USER_HOME/.cache" /cache || true
   configure_docker_socket_access
 
-  export HOME="$CODEX_HOME"
+  export HOME="$CONTAINER_USER_HOME"
+  export USER="$CODEX_USER" LOGNAME="$CODEX_USER"
   exec gosu "$CODEX_USER" "$@"
 fi
 

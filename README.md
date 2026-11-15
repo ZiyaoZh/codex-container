@@ -236,7 +236,7 @@ When Docker access is enabled, the repository is also mounted at the same absolu
 The container home is mounted here:
 
 ```text
-/home/codex
+/home/<host-user>
 ```
 
 By default, the host path for the persistent container home is:
@@ -246,7 +246,7 @@ By default, the host path for the persistent container home is:
 ```
 
 This keeps agent state across `--rm` container runs.
-The launcher creates `/home/codex/.cache` in this persistent home, and the entrypoint assigns it to the
+The launcher creates `/home/<host-user>/.cache` in this persistent home, and the entrypoint assigns it to the
 runtime Codex UID/GID so browser tooling can write its cache without running as root.
 
 ## Default Mounts
@@ -255,24 +255,24 @@ The launcher mounts these host paths when available:
 
 ```text
 current repo                          -> /workspace/repo
-~/.cache/codex-container/home          -> /home/codex
-~/.codex/{auth.json,config.toml,version.json} -> /home/codex/.codex/{...}
-~/.codex/{skills,plugins}              -> /home/codex/.codex/{skills,plugins}
-~/.codex/{history.jsonl,session_index.jsonl,models_cache.json} -> /home/codex/.codex/{...}
-~/.codex/{sessions,attachments,shell_snapshots,tui-thread-reference-capabilities} -> /home/codex/.codex/{...}
-~/.claude                              -> /home/codex/.claude
-~/.config/gh                           -> /home/codex/.config/gh
-~/.ssh                                 -> /home/codex/.ssh:ro
-~/.gitconfig                           -> /home/codex/.gitconfig:ro
-~/.git-credentials                     -> /home/codex/.git-credentials:ro
-~/.gnupg                               -> /home/codex/.gnupg:ro
-~/.claude.json                         -> /home/codex/.claude.json
-~/.cache/codex-container/npm           -> /home/codex/.npm
-~/.cache/codex-container/pip           -> /home/codex/.cache/pip
-~/.cache/codex-container/cargo         -> /home/codex/.cargo
-~/.cache/codex-container/go            -> /home/codex/go
-~/.cache/codex-container/maven         -> /home/codex/.m2
-~/.cache/codex-container/gradle        -> /home/codex/.gradle
+~/.cache/codex-container/home          -> /home/<host-user>
+~/.codex/{auth.json,config.toml,version.json} -> /home/<host-user>/.codex/{...}
+~/.codex/{skills,plugins}              -> /home/<host-user>/.codex/{skills,plugins}
+~/.codex/{history.jsonl,session_index.jsonl,models_cache.json} -> /home/<host-user>/.codex/{...}
+~/.codex/{sessions,attachments,shell_snapshots,tui-thread-reference-capabilities} -> /home/<host-user>/.codex/{...}
+~/.claude                              -> /home/<host-user>/.claude
+~/.config/gh                           -> /home/<host-user>/.config/gh
+~/.ssh                                 -> /home/<host-user>/.ssh:ro
+~/.gitconfig                           -> /home/<host-user>/.gitconfig:ro
+~/.git-credentials                     -> /home/<host-user>/.git-credentials:ro
+~/.gnupg                               -> /home/<host-user>/.gnupg:ro
+~/.claude.json                         -> /home/<host-user>/.claude.json
+~/.cache/codex-container/npm           -> /home/<host-user>/.npm
+~/.cache/codex-container/pip           -> /home/<host-user>/.cache/pip
+~/.cache/codex-container/cargo         -> /home/<host-user>/.cargo
+~/.cache/codex-container/go            -> /home/<host-user>/go
+~/.cache/codex-container/maven         -> /home/<host-user>/.m2
+~/.cache/codex-container/gradle        -> /home/<host-user>/.gradle
 ~/.cache/codex-container/cache         -> /cache
 ```
 
@@ -296,7 +296,7 @@ When the host Docker socket is enabled, the launcher additionally mounts:
 ```text
 /var/run/docker.sock                   -> /var/run/docker.sock
 absolute host repository path          -> same absolute container path
-~/.docker                              -> /home/codex/.docker
+~/.docker                              -> /home/<host-user>/.docker
 ```
 
 The `~/.docker` mount is conditional. If the host directory does not exist, Docker creates and uses configuration inside the persistent container home instead.
@@ -433,7 +433,7 @@ CODEX_IMAGE             Docker image name. Default: codex-universal:latest
 CODEX_REPO_DIR          Repository directory. Default: current directory
 CODEX_AGENT             Agent to start: codex or claude. Default: codex
 CODEX_CONTAINER_NAME    Container name. Default: codex-<repo-name>-<path-hash>
-CODEX_CONTAINER_HOME    Persistent /home/codex path. Default: ~/.cache/codex-container/home
+CODEX_CONTAINER_HOME    Persistent /home/<host-user> path. Default: ~/.cache/codex-container/home
 CODEX_CACHE_ROOT        Cache root. Default: ~/.cache/codex-container
 CODEX_MOUNT_DOCKER      auto, 1, or 0. Default: auto
 ```
@@ -522,3 +522,16 @@ codex-container         Host launcher that mounts the current repository and use
 README.md               English usage guide
 README.zh-CN.md         Chinese usage guide
 ```
+
+## Host user identity and SSH service isolation
+
+The launcher uses the invoking host username, UID/GID and absolute home path
+(e.g. `zhouziyao`, `/home/zhouziyao`). It does not create a separate `codex`
+account. The home is still backed by `~/.cache/codex-container/home`, not the
+real host home. `CODEX_HOME` points to `.codex` inside that isolated home;
+packages, daemon control sockets and SQLite databases are not mounted from
+the host. This prevents container daemon symlinks from breaking host SSH
+connections. Both fresh launches and reused sessions use the same identity.
+
+Rebuild the image after this entrypoint change. Containers with the old home
+layout must be exited and recreated; the launcher refuses to reuse them.

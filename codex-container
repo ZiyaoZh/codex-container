@@ -342,6 +342,9 @@ DEFAULT_CONTAINER_WORKDIR="/workspace/repo"
 CONTAINER_WORKDIR="$DEFAULT_CONTAINER_WORKDIR"
 CACHE_ROOT="${CODEX_CACHE_ROOT:-$HOME/.cache/codex-container}"
 CONTAINER_HOME="${CONTAINER_HOME:-$CACHE_ROOT/home}"
+# Match the host identity and path, but keep the backing home isolated.
+CONTAINER_USER="$(id -un)"
+CONTAINER_USER_HOME="$HOME"
 DOCKER_MODE="none"
 
 extra_mount_sources=()
@@ -514,7 +517,7 @@ if container_running="$(docker inspect --format '{{.State.Running}}' "$CONTAINER
     "$CONTAINER_NAME")"
   while IFS= read -r existing_target; do
     case "$existing_target" in
-      /home/codex/.codex/*.sqlite|/home/codex/.codex/*.sqlite-wal|/home/codex/.codex/*.sqlite-shm)
+      */.codex/*.sqlite|*/.codex/*.sqlite-wal|*/.codex/*.sqlite-shm)
         echo "The running container has an obsolete SQLite file mount: $existing_target" >&2
         echo "Exit its active sessions, then run: codex-container down $CONTAINER_NAME" >&2
         echo "Start it again with this launcher to use container-owned databases." >&2
@@ -522,6 +525,13 @@ if container_running="$(docker inspect --format '{{.State.Running}}' "$CONTAINER
         ;;
     esac
   done <<< "$existing_mount_targets"
+
+  if ! grep -Fxq "$CONTAINER_USER_HOME" <<< "$existing_mount_targets"; then
+    echo "The running container uses an obsolete home/user layout: $CONTAINER_NAME" >&2
+    echo "Exit its active sessions, then run: codex-container down $CONTAINER_NAME" >&2
+    echo "Start it again to use your host username and home path." >&2
+    exit 1
+  fi
 
   existing_workdir="$(docker inspect \
     --format '{{with index .Config.Labels "dev.codex-container.workdir"}}{{.}}{{end}}' \
@@ -622,12 +632,15 @@ if container_running="$(docker inspect --format '{{.State.Running}}' "$CONTAINER
   echo "Reusing running container: $CONTAINER_NAME" >&2
   exec docker exec \
     -it \
-    -e "HOME=/home/codex" \
+    -e "HOME=$CONTAINER_USER_HOME" \
+    -e "USER=$CONTAINER_USER" \
+    -e "LOGNAME=$CONTAINER_USER" \
+    -e "CODEX_HOME=$CONTAINER_USER_HOME/.codex" \
     -e "TERM=${TERM:-xterm-256color}" \
     -e "COLORTERM=${COLORTERM:-truecolor}" \
     -w "$CONTAINER_WORKDIR" \
     "$CONTAINER_NAME" \
-    gosu codex \
+    gosu "$CONTAINER_USER" \
     "${container_command[@]}"
 fi
 
@@ -641,6 +654,11 @@ docker_args=(
   --label "dev.codex-container.docker-mode=$DOCKER_MODE"
   -e "CODEX_UID=$(id -u)"
   -e "CODEX_GID=$(id -g)"
+  -e "CODEX_USER=$CONTAINER_USER"
+  -e "CONTAINER_USER_HOME=$CONTAINER_USER_HOME"
+  -e "CODEX_HOME=$CONTAINER_USER_HOME/.codex"
+  -e "USER=$CONTAINER_USER"
+  -e "LOGNAME=$CONTAINER_USER"
   -e "TERM=${TERM:-xterm-256color}"
   -e "COLORTERM=${COLORTERM:-truecolor}"
   -v "$REPO_DIR:$DEFAULT_CONTAINER_WORKDIR"
@@ -674,15 +692,15 @@ mkdir -p \
   "$CONTAINER_HOME"/{.cache,.config,.codex}
 
 docker_args+=(
-  -v "$CONTAINER_HOME:/home/codex"
-  -v "$HOME/.claude:/home/codex/.claude"
-  -v "$HOME/.config/gh:/home/codex/.config/gh"
-  -v "$CACHE_ROOT/npm:/home/codex/.npm"
-  -v "$CACHE_ROOT/pip:/home/codex/.cache/pip"
-  -v "$CACHE_ROOT/cargo:/home/codex/.cargo"
-  -v "$CACHE_ROOT/go:/home/codex/go"
-  -v "$CACHE_ROOT/maven:/home/codex/.m2"
-  -v "$CACHE_ROOT/gradle:/home/codex/.gradle"
+  -v "$CONTAINER_HOME:$CONTAINER_USER_HOME"
+  -v "$HOME/.claude:$CONTAINER_USER_HOME/.claude"
+  -v "$HOME/.config/gh:$CONTAINER_USER_HOME/.config/gh"
+  -v "$CACHE_ROOT/npm:$CONTAINER_USER_HOME/.npm"
+  -v "$CACHE_ROOT/pip:$CONTAINER_USER_HOME/.cache/pip"
+  -v "$CACHE_ROOT/cargo:$CONTAINER_USER_HOME/.cargo"
+  -v "$CACHE_ROOT/go:$CONTAINER_USER_HOME/go"
+  -v "$CACHE_ROOT/maven:$CONTAINER_USER_HOME/.m2"
+  -v "$CACHE_ROOT/gradle:$CONTAINER_USER_HOME/.gradle"
   -v "$CACHE_ROOT/cache:/cache"
 )
 
@@ -697,7 +715,7 @@ mount_codex_file() {
   local source="$HOME/.codex/$name"
   [[ -f "$source" ]] || return 0
   touch "$CONTAINER_HOME/.codex/$name"
-  docker_args+=(-v "$source:/home/codex/.codex/$name")
+  docker_args+=(-v "$source:$CONTAINER_USER_HOME/.codex/$name")
 }
 
 mount_codex_dir() {
@@ -705,7 +723,7 @@ mount_codex_dir() {
   local source="$HOME/.codex/$name"
   [[ -d "$source" ]] || return 0
   mkdir -p "$CONTAINER_HOME/.codex/$name"
-  docker_args+=(-v "$source:/home/codex/.codex/$name")
+  docker_args+=(-v "$source:$CONTAINER_USER_HOME/.codex/$name")
 }
 
 mount_codex_file auth.json
@@ -722,16 +740,16 @@ mount_codex_dir shell_snapshots
 mount_codex_dir tui-thread-reference-capabilities
 
 if [[ "$MOUNT_SSH" == "1" ]]; then
-  mount_if_exists "$HOME/.ssh" "/home/codex/.ssh" "ro"
+  mount_if_exists "$HOME/.ssh" "$CONTAINER_USER_HOME/.ssh" "ro"
 fi
 
 if [[ "$MOUNT_GITCONFIG" == "1" ]]; then
-  mount_if_exists "$HOME/.gitconfig" "/home/codex/.gitconfig" "ro"
+  mount_if_exists "$HOME/.gitconfig" "$CONTAINER_USER_HOME/.gitconfig" "ro"
 fi
 
-mount_if_exists "$HOME/.git-credentials" "/home/codex/.git-credentials" "ro"
-mount_if_exists "$HOME/.gnupg" "/home/codex/.gnupg" "ro"
-mount_if_exists "$HOME/.claude.json" "/home/codex/.claude.json"
+mount_if_exists "$HOME/.git-credentials" "$CONTAINER_USER_HOME/.git-credentials" "ro"
+mount_if_exists "$HOME/.gnupg" "$CONTAINER_USER_HOME/.gnupg" "ro"
+mount_if_exists "$HOME/.claude.json" "$CONTAINER_USER_HOME/.claude.json"
 
 if [[ "$MOUNT_DOCKER" == "1" ]]; then
   if [[ -S /var/run/docker.sock ]]; then
@@ -744,7 +762,7 @@ fi
 
 if [[ "$MOUNT_DOCKER" == "1" ]]; then
   docker_args+=(-e "DOCKER_HOST=unix:///var/run/docker.sock")
-  mount_if_exists "$HOME/.docker" "/home/codex/.docker"
+  mount_if_exists "$HOME/.docker" "$CONTAINER_USER_HOME/.docker"
 fi
 
 for index in "${!extra_mount_sources[@]}"; do

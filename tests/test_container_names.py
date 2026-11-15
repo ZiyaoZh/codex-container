@@ -137,6 +137,30 @@ class LauncherTestCase(unittest.TestCase):
 
 
 class ContainerNameTests(LauncherTestCase):
+    def test_host_identity_and_codex_home_survive_container_reuse(self):
+        self.launch()
+        self.launch()
+        username = subprocess.check_output(["id", "-un"], text=True).strip()
+        calls = [call for call in self.docker_calls() if call[0] in ("run", "exec")]
+        self.assertEqual([call[0] for call in calls], ["run", "exec"])
+        for call in calls:
+            env = [call[i + 1] for i, arg in enumerate(call) if arg == "-e"]
+            self.assertIn(f"USER={username}", env)
+            self.assertIn(f"CODEX_HOME={self.env['HOME']}/.codex", env)
+        self.assertIn(f"CODEX_USER={username}", calls[0])
+        self.assertEqual(calls[1][calls[1].index("gosu") + 1], username)
+
+    def test_old_codex_user_home_is_rejected_before_exec(self):
+        created = self.launch()
+        state = self.state()
+        state[created["name"]]["mounts"] = ["/host/cache:/home/codex"]
+        self.state_path.write_text(json.dumps(state))
+        before = len(self.docker_calls())
+        result = self.invoke()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("obsolete home/user layout", result.stderr)
+        self.assertFalse(any(call[0] == "exec" for call in self.docker_calls()[before:]))
+
     def test_host_sqlite_databases_and_sidecars_are_not_mounted(self):
         host_home = self.root / "host-home"
         host_codex = host_home / ".codex"
@@ -150,7 +174,7 @@ class ContainerNameTests(LauncherTestCase):
         local_database = container_codex / "state_5.sqlite"
         local_database.write_bytes(b"existing container database")
         container = self.launch(variables={"HOME": str(host_home)})
-        self.assertIn(f"{container_codex.parent}:/home/codex", container["mounts"])
+        self.assertIn(f"{container_codex.parent}:{host_home}", container["mounts"])
         self.assertFalse(any(".sqlite" in mount for mount in container["mounts"]))
         self.assertEqual(local_database.read_bytes(), b"existing container database")
         self.assertTrue(all(path.read_bytes() == b"host database"
@@ -186,10 +210,10 @@ class ContainerNameTests(LauncherTestCase):
         (host_home / ".cache" / "codex-container" / "home" / ".codex").mkdir(parents=True)
         container = self.launch(variables={"HOME": str(host_home)})
         host_codex = str(host_codex_path)
-        self.assertIn(f"{host_codex}/config.toml:/home/codex/.codex/config.toml", container["mounts"])
-        self.assertIn(f"{host_codex}/auth.json:/home/codex/.codex/auth.json", container["mounts"])
-        self.assertIn(f"{host_codex}/history.jsonl:/home/codex/.codex/history.jsonl", container["mounts"])
-        self.assertNotIn(f"{host_codex}:/home/codex/.codex", container["mounts"])
+        self.assertIn(f"{host_codex}/config.toml:{host_home}/.codex/config.toml", container["mounts"])
+        self.assertIn(f"{host_codex}/auth.json:{host_home}/.codex/auth.json", container["mounts"])
+        self.assertIn(f"{host_codex}/history.jsonl:{host_home}/.codex/history.jsonl", container["mounts"])
+        self.assertNotIn(f"{host_codex}:{host_home}/.codex", container["mounts"])
 
     def test_same_basename_in_different_directories_creates_separate_containers(self):
         first = self.launch()
